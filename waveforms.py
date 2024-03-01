@@ -24,29 +24,41 @@ def burst_sin(t):
     return y
 
 # A rising tone
-def rising_tone():
-    T = 1.
-    f_s = 1/35000
-    N = int(T/f_s)
+# Make the frequency changes happen after one full period of the previous frequency
 
-    t = np.linspace(0,T,N)
-    freq = np.zeros_like(t)
+def rising_tone():
+    
+    f_s = 1/35000    
+    freq = []
 
     f_min = 10
-    n_f = 20
+    n_f = 11
     f_max = n_f*f_min
 
-    # change frequency 20 times within 6s duration
-    for i in range(n_f):
-        for j in range(int(i*N/n_f),int((i+1)*N/n_f)):
-            freq[j] = i*f_min
+    # change frequency n_f times within duration, and then create time array based on fnal duration
+    
+    T = 0.
+    for i in range(1,n_f):
+
+        freq_step = i*f_min                  # frequency element of rising tone
+        period_step = 1./freq_step           # for the given frequency, how long to complete a full period
+        T = T + period_step                  # adding up each period to get full rising tone duration
+
+        rng = int((period_step/f_s))         # number of time elements for this frequency 
+        
+        freq.extend([freq_step]*(rng))       # extend the list to have this frequency for the desired number of steps
+        
+
+    N = len(freq)
+    
+    t = np.linspace(0.,T, N)                 # creating the time array fo plotting
+    
+    argument = (freq * t )                     # argument inside sin function
+
+    data = np.sin(argument)                    # artificual rising waveform data
 
 
-    x_plot = (freq * t )  # arhument inside sin function
-
-    data = np.sin(x_plot)
-
-    return data,t,freq
+    return data,t,freq,N
 
 
 def fft_short(udata,vdata,wdata):
@@ -58,7 +70,7 @@ def fft_short(udata,vdata,wdata):
     T = 1.0/35000.0                                         # Time between samples
     T_window = N*T
     
-    w = np.hanning(N)                                       # hanning window
+    w = 1. #np.hanning(N)                                       # hanning window
     wms = np.mean(w**2)                                     # window spectral power correction
 
 
@@ -109,15 +121,15 @@ def fft_short(udata,vdata,wdata):
     return mag,freq, bu_fft
 
 
-r_tone, t, chosen_freq = rising_tone()
+r_tone, t, chosen_freq, N = rising_tone()
 
 FFT_mag, FFT_freq, bu_fft = fft_short(r_tone,r_tone,r_tone)
 
 bu_ifft = np.fft.ifft(bu_fft,len(bu_fft))
 
-fig,axs = plt.subplots(4,1)
+fig,axs = plt.subplots(5,1)
 
-ax1,ax2,ax3,ax4 = axs
+ax1,ax2,ax3,ax4,ax5 = axs
 ax1.plot(t, r_tone, label="sin(freq * x)")
 ax1.set_xlabel("Time")
 ax1.set_ylabel("Amplitude")
@@ -128,7 +140,7 @@ ax2.set_xlabel("Time")
 ax2.set_ylabel("Frequency")
 ax2.legend()
 
-ax3.plot(FFT_freq,FFT_mag,label = "FFT spectrum")
+ax3.plot(FFT_freq,bu_fft,label = "FFT spectrum")
 ax3.set_xlim(-200,200)
 ax3.set_xlabel("Frequency")
 ax3.set_ylabel("Power spectral density")
@@ -136,7 +148,12 @@ ax3.legend()
 
 ax4.plot(t,bu_ifft)
 
-plt.gcf().set_size_inches((12, 24))
+ax5.plot(t,bu_ifft/r_tone,label='Ratio')
+ax5.legend()
+ax5.set_xlabel('Time')
+ax5.set_ylabel('Ratio of signal with inverse FFT')
+
+plt.gcf().set_size_inches((12, 30))
 plt.show()
 
     
