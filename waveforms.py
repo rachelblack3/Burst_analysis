@@ -31,43 +31,47 @@ def rising_tone():
     f_s = 1/35000    
     freq = []
 
-    f_min = 10
-    n_f = 11
+    f_min = 30
+    n_f = 10
     f_max = n_f*f_min
 
     # change frequency n_f times within duration, and then create time array based on fnal duration
     
     T = 0.
     for i in range(1,n_f):
-
-        freq_step = i*f_min                  # frequency element of rising tone
+        
+        freq_step = (i/i)*2*f_min                  # frequency element of rising tone
+        omega = freq_step*2*np.pi
         period_step = 1./freq_step           # for the given frequency, how long to complete a full period
+        print(freq_step,period_step)
         T = T + period_step                  # adding up each period to get full rising tone duration
 
         rng = int((period_step/f_s))         # number of time elements for this frequency 
-        
-        freq.extend([freq_step]*(rng))       # extend the list to have this frequency for the desired number of steps
-        
+        print(rng)
+        freq.extend([omega]*(rng))       # extend the list to have this frequency for the desired number of steps
+        f_min = freq_step   
+
 
     N = len(freq)
     
     t = np.linspace(0.,T, N)                 # creating the time array fo plotting
     
-    argument = (freq * t )                     # argument inside sin function
+    argument = (freq * t )                   # argument inside sin function
 
-    data = np.sin(argument)                    # artificual rising waveform data
+    data = np.sin(argument)                  # artificual rising waveform data
 
+    freq = [x/(2*np.pi) for x in freq]
 
     return data,t,freq,N
 
 
-def fft_short(udata,vdata,wdata):
+def fft_short(udata):
     from scipy.fft import fft, fftfreq
     import numpy as np
 
     N = len(udata)                                               # Number of sample points
 
-    T = 1.0/35000.0                                         # Time between samples
+    T = 1.0/35000.0                                              # Time between samples
     T_window = N*T
     
     w = 1. #np.hanning(N)                                       # hanning window
@@ -79,33 +83,24 @@ def fft_short(udata,vdata,wdata):
     """
     
     bu_fft = fft(udata*w*(1/N))
-    bv_fft = fft(vdata*w*(1/N))
-    bw_fft = fft(wdata*w*(1/N))
+
 
     """ 
     Frequencies from FFT
     """
-    freq = fftfreq(N, T)
+    freq = fftfreq(N, T)[:N//2]
     df = freq[1]-freq[0]
     
-   
-    """ 
-    define complex array for storing FFTs
-    """
-    fft_arr = np.zeros((3,len(freq)),dtype=complex)
-
     """ 
     Multiply each element of fft array by correspondong complex coefficient
     """
-    fft_arr[0,:] = bu_fft
-    fft_arr[1,:] = bv_fft
-    fft_arr[2,:] = bw_fft
+    bu_fft = fft(udata*w*(1/N))
     #bmag_fft = bmag_fft[1:n_f+1]*Bcal_c
 
     """ 
     take absolute values and square to get power density
     """
-    total = abs(fft_arr) * abs(fft_arr)
+    total = abs(bu_fft) * abs(bu_fft)
 
     """ 
     divide array by correction for spectral power lost by using a hanning window
@@ -116,14 +111,15 @@ def fft_short(udata,vdata,wdata):
     find B field magnitude
     """
     
-    mag =(total[0,:]+total[1,:]+total[2,:])*2*T_window
+    mag = total*2*T_window
+    mag = mag[0:N//2]
 
     return mag,freq, bu_fft
 
 
 r_tone, t, chosen_freq, N = rising_tone()
 
-FFT_mag, FFT_freq, bu_fft = fft_short(r_tone,r_tone,r_tone)
+FFT_mag, FFT_freq, bu_fft = fft_short(r_tone)
 
 bu_ifft = np.fft.ifft(bu_fft,len(bu_fft))
 
@@ -140,8 +136,8 @@ ax2.set_xlabel("Time")
 ax2.set_ylabel("Frequency")
 ax2.legend()
 
-ax3.plot(FFT_freq,bu_fft,label = "FFT spectrum")
-ax3.set_xlim(-200,200)
+ax3.plot(FFT_freq,FFT_mag,label = "FFT spectrum")
+ax3.set_xlim(0,50)
 ax3.set_xlabel("Frequency")
 ax3.set_ylabel("Power spectral density")
 ax3.legend()
