@@ -120,7 +120,7 @@ def fft_full(udata):
     """ 
     Multiply each element of fft array by correspondong complex coefficient
     """
-    bu_fft = fft(udata*w*(1/N))
+    bu_fft = fft(udata*w*(1/N))[0:N//2]
     #bmag_fft = bmag_fft[1:n_f+1]*Bcal_c
 
     """ 
@@ -138,7 +138,7 @@ def fft_full(udata):
     """
     
     mag = total*2*T_window
-    mag = mag[0:N//2]
+    
 
     return mag,freq, bu_fft
 
@@ -150,7 +150,7 @@ def fft_windows(udata,n_box):
 
    
     N = len(udata)                                                       # Number of sample points
-    box_size = int(N/n_box)                                                # Number of samples in each box 
+    box_size = int(n_box)                                                # Number of samples in each box 
     N_box = int(N/box_size)                                              # Number of boxes
     half_window = int(box_size/2)                                        # Size of half-window
     
@@ -188,9 +188,6 @@ def fft_windows(udata,n_box):
         index_start = i*half_window-1
         index_end = (i*half_window)+box_size-1
 
-        #udata[index_start:index_end] = linear_fit(udata[index_start:index_end],box_size)
-        #vdata[index_start:index_end] = linear_fit(vdata[index_start:index_end],box_size)
-        #wdata[index_start:index_end] = linear_fit(wdata[index_start:index_end],box_size)
                                                 
         fft_box[i,:] = (fft(w*(1/box_size)*udata[index_start:index_end]))[0:box_size//2]
         
@@ -226,14 +223,14 @@ def fft_windows(udata,n_box):
 
 def fft_over_full_interval(t,r_tone,
                            chosen_freq,
-                           FFT_freq,FFT_mag,
-                           bu_ifft):
+                           FFT_freq,FFT_mag):
+                           #bu_ifft):
     
     """ Creating the plots for the FFT over the full interval """
 
-    fig,axs = plt.subplots(5,1)
+    fig,axs = plt.subplots(3,1)
 
-    ax1,ax2,ax3,ax4,ax5 = axs
+    ax1,ax2,ax3 = axs
     ax1.plot(t, r_tone, label="sin(freq * x)")
     ax1.set_xlabel("Time")
     ax1.set_ylabel("Amplitude")
@@ -250,14 +247,14 @@ def fft_over_full_interval(t,r_tone,
     ax3.set_ylabel("Power spectral density")
     ax3.legend()
 
-    ax4.plot(t,bu_ifft)
+    #ax4.plot(t,bu_ifft)
 
-    ax5.plot(t,bu_ifft/r_tone,label='Ratio')
-    ax5.legend()
-    ax5.set_xlabel('Time')
-    ax5.set_ylabel('Ratio of signal with inverse FFT')
+    #ax5.plot(t,bu_ifft/r_tone,label='Ratio')
+    #ax5.legend()
+    #ax5.set_xlabel('Time')
+    #ax5.set_ylabel('Ratio of signal with inverse FFT')
 
-    plt.gcf().set_size_inches((12, 30))
+    plt.gcf().set_size_inches((12, 18))
     plt.show()
 
     return
@@ -313,7 +310,7 @@ def fft_over_windows(t,r_tone,
 
 
 def comparison_plot(FFT_freq_nw,FFT_mag_nw,
-                           FFT_freq_w,FFT_mag_w):
+                    FFT_mag_w,ratio):
     
     """ Creating the plots for the FFT over the full interval """
 
@@ -323,16 +320,19 @@ def comparison_plot(FFT_freq_nw,FFT_mag_nw,
     
 
     ax1.plot(FFT_freq_nw,FFT_mag_nw,label = "Full interval FFT")
-    ax1.set_xlim(0,50)
+    ax1.plot(FFT_freq_nw,FFT_mag_w,label = "FFT with overlapping windows")
+    ax1.set_yscale('log')
     ax1.set_xlabel("Frequency")
     ax1.set_ylabel("Power spectral density")
     ax1.legend()
 
-    ax1.plot(FFT_freq_w,FFT_mag_w,label = "FFT with overlapping windows")
-    ax1.set_xlim(0,50)
-    ax1.set_xlabel("Frequency")
-    ax1.set_ylabel("Power spectral density")
-    ax1.legend()
+    
+    ax2.plot(FFT_freq_nw,ratio,label = r'$PSD\_{Total\ FFT}/PSD\_{Window\ averaged}$')
+    #ax2.set_yscale('log')
+    ax2.set_xlabel("Frequency")
+    ax2.set_ylabel("Power spectral density")
+    ax2.legend()
+
 
 
     plt.gcf().set_size_inches((12, 30))
@@ -355,42 +355,44 @@ background_freq[int(len(background_data)/2) - int(len(r_tone)/2) :int(len(backgr
 rising_mag, rising_freq, rising_bu_fft = fft_full(r_tone)
 
 comp_mag, comp_freq, comp_bu_fft = fft_full(background_data)
-comp_bu_ifft = np.fft.ifft(comp_bu_fft,len(comp_bu_fft))
+#comp_bu_ifft = np.fft.ifft(comp_bu_fft,len(comp_bu_fft))
 
-print("the composite background and rising tone shape is", np.shape(background_data))
 
-bu_ifft = np.fft.ifft(rising_bu_fft,len(rising_bu_fft))
+#bu_ifft = np.fft.ifft(rising_bu_fft,len(rising_bu_fft))
 
 
 just_rising = {"time array": t,
                     "waveform": r_tone,
                     "artifical frequencies": chosen_freq,
                     "FFT_frequencies": rising_freq,
-                    "FFT_psd": rising_mag,
-                    "Inverse FFT": bu_ifft}
+                    "FFT_psd": rising_mag}
+                    #"Inverse FFT": bu_ifft}
 
 composite_wave = {"time array": full_t,
                     "waveform": background_data,
                     "artifical frequencies": background_freq,
                     "FFT_frequencies": comp_freq,
-                    "FFT_psd": comp_mag,
-                    "Inverse FFT": comp_bu_ifft}
+                    "FFT_psd": comp_mag}
+                    #"Inverse FFT": comp_bu_ifft}
+
+print("the composite background and rising tone shape is", np.shape(background_data))
+print("Number of frequencies in full interval FFT is", len(composite_wave["FFT_frequencies"]))
 
 
 plots_full_interval = fft_over_full_interval(just_rising["time array"],just_rising["waveform"],
                            just_rising["artifical frequencies"],
-                           just_rising["FFT_frequencies"],just_rising["FFT_psd"],
-                           just_rising["Inverse FFT"])
+                           just_rising["FFT_frequencies"],just_rising["FFT_psd"])
+                           #just_rising["Inverse FFT"])
 
 plots_with_background = fft_over_full_interval(composite_wave["time array"],composite_wave["waveform"],
                            composite_wave["artifical frequencies"],
-                           composite_wave["FFT_frequencies"],composite_wave["FFT_psd"],
-                           composite_wave["Inverse FFT"])
+                           composite_wave["FFT_frequencies"],composite_wave["FFT_psd"])
+                           #composite_wave["Inverse FFT"])
 
 
 
-FFT_mag, FFT_freq, bu_fft, n_time_bins = fft_windows(r_tone,10)
-comp_mag, comp_freq, comp_bu_fft, comp_time_bins = fft_windows(background_data,1000)
+FFT_mag, FFT_freq, bu_fft, n_time_bins = fft_windows(r_tone,350)
+comp_mag, comp_freq, comp_bu_fft, comp_time_bins = fft_windows(background_data,3500)
 
 
 averaging_timesteps = np.linspace(0,period, n_time_bins)
@@ -421,28 +423,120 @@ plots_windows = fft_over_windows(composite_wave["time array"],composite_wave["wa
 
 
 
-# Integrate in frequency
+# Average the PSD over all of the windows to compare with FFT over full interval
+def average_windows(mag,frequency):
+    n_f = len(frequency)
+    averaged_spec = np.zeros_like(frequency)  
 
-def integrate_in_small_windows(B,freq,time):
-
-    n_f = len(freq)
-
-    n_bins = len(time)
-
-    dist=[]
-
-    for n in range(n_f):
-        high_res_bint=0 
-        # Integrate in frequency 
-        for m in range(n_bins-1):
-                
-            high_res_bint = high_res_bint + 0.5*(B[m,n]+B[m+1,n])*(time[m+1]-time[m])
-                    
-        dist.append(high_res_bint)
-
-    return dist
+    for m in range(n_f):
+        averaged_spec[m] = np.mean(mag[:,m])
+  
+    return averaged_spec
 
 
-integrated_windows = integrate_in_small_windows(comp_windows_fft["FFT_psd"],comp_windows_fft["FFT_frequencies"],comp_windows_fft["time array"])
+def rebin(bin_edges,mag,frequency_original):
+    """ 
+    Doing the rebinning
+    """
+    import pandas as pd
 
-do_comparison = comparison_plot(composite_wave["FFT_frequencies"],composite_wave["FFT_psd"],comp_windows_fft["FFT_frequencies"],integrated_windows)
+    # Create dataframe
+    rebin_dat=pd.DataFrame()
+
+    rebin_dat['Data'] = mag
+    
+    # Create and save frequencies to one column
+    rebin_dat['Frequency']= frequency_original
+    
+    """
+    pd.cut() bins all frequencies according to defined semi_log bins
+    groupby() groups all data in frame by these bines
+    then select the DATA and take the MEAN in each bin
+    to_numpy saves this to an array
+    """
+    
+    rebinned=rebin_dat.groupby(pd.cut(rebin_dat.Frequency,bins=bin_edges)).Data.mean().to_numpy()
+    
+    return rebinned
+
+# Average the overallping window FFT over full duration
+averaged_windows = average_windows(comp_windows_fft["FFT_psd"],comp_windows_fft["FFT_frequencies"])
+
+# Define the frequency bins for the window FFT, so that we can rebin the higher frequency resoloution long FFT into them
+
+bin_edges = list(comp_windows_fft["FFT_frequencies"])
+bin_edges.append(bin_edges[-1]+166.6)
+
+# Rebin full FFT into window frequency bins 
+rebinned_fullFFT = rebin(bin_edges,composite_wave["FFT_psd"],composite_wave["FFT_frequencies"])
+
+ratio_of_psds = rebinned_fullFFT/averaged_windows
+
+# Plot the rebinned full FFT next to the window FFT
+do_comparison = comparison_plot(comp_windows_fft["FFT_frequencies"],rebinned_fullFFT,averaged_windows,ratio_of_psds)
+
+
+""" Now, we want to check how the ratio between true frequency change with the resoloution from the FFT windows """
+
+# In other words, we want to change the number of windows, and see how that effects the output we get out
+
+n_steps = 4
+
+fig,axs = plt.subplots(2,1)
+
+ax1,ax2 = axs
+
+for j in range(1,n_steps+1):
+
+    # Do the windowing with different number of windows
+
+    n_elements = len(background_data)/(10**j)
+
+    n_windows = 10**j
+
+    print(n_windows,'Done')
+
+    comp_mag, comp_freq, comp_bu_fft, comp_time_bins = fft_windows(background_data,n_elements)
+
+    comp_timesteps = np.linspace(0.,comp_duration, comp_time_bins) 
+
+
+    comp_windows_fft = {"time array": comp_timesteps,
+                        "rising tone waveform": background_data,
+                        "artifical frequencies": background_freq,
+                        "FFT_frequencies": comp_freq,
+                        "FFT_psd": comp_mag}
+    
+    # Average the overallping window FFT over full duration
+    averaged_windows = average_windows(comp_windows_fft["FFT_psd"],comp_windows_fft["FFT_frequencies"])    
+
+    bin_edges = list(comp_windows_fft["FFT_frequencies"])
+    bin_edges.append(bin_edges[-1]+166.6)
+
+    # Rebin full FFT into window frequency bins 
+    rebinned_fullFFT = rebin(bin_edges,composite_wave["FFT_psd"],composite_wave["FFT_frequencies"])
+
+    ratio_of_psds = rebinned_fullFFT/averaged_windows
+
+
+    label = "Number of windows =" + str(n_windows)
+
+    ax1.plot(comp_windows_fft['FFT_frequencies'],rebinned_fullFFT,label = "Full FFT - "+ str(n_windows) + " windows")
+    ax1.plot(comp_windows_fft["FFT_frequencies"],averaged_windows,label = " Av. FFT - "+ str(n_windows) + " windows")
+    ax1.set_yscale('log')
+    ax1.set_xlabel("Frequency")
+    ax1.set_ylabel("Power spectral density")
+
+    ax2.plot(comp_windows_fft["FFT_frequencies"],ratio_of_psds,label = "Ratio -"+ str(n_windows) + " windows")
+    #ax2.set_yscale('log')
+    ax2.set_xlabel("Frequency")
+    ax2.set_ylabel("Ratio")
+
+# Put a legend to the right of the current axis
+ax1.legend(loc='center left', bbox_to_anchor=(1., 0.5),fontsize = 6)
+
+
+ax2.legend(loc='center left',bbox_to_anchor=(1., 0.5),fontsize = 6)
+plt.tight_layout()
+plt.savefig("effect_of_nw.png")
+plt.show()
