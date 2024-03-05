@@ -306,7 +306,39 @@ def fft_over_windows(t,r_tone,
 
 
     plt.gcf().set_size_inches((12, 18))
+    plt.savefig('windowed.png')
     plt.show()
+
+    return
+
+
+def comparison_plot(FFT_freq_nw,FFT_mag_nw,
+                           FFT_freq_w,FFT_mag_w):
+    
+    """ Creating the plots for the FFT over the full interval """
+
+    fig,axs = plt.subplots(2,1)
+
+    ax1,ax2 = axs
+    
+
+    ax1.plot(FFT_freq_nw,FFT_mag_nw,label = "Full interval FFT")
+    ax1.set_xlim(0,50)
+    ax1.set_xlabel("Frequency")
+    ax1.set_ylabel("Power spectral density")
+    ax1.legend()
+
+    ax1.plot(FFT_freq_w,FFT_mag_w,label = "FFT with overlapping windows")
+    ax1.set_xlim(0,50)
+    ax1.set_xlabel("Frequency")
+    ax1.set_ylabel("Power spectral density")
+    ax1.legend()
+
+
+    plt.gcf().set_size_inches((12, 30))
+    plt.savefig('Comaprison_FFT.png')
+    plt.show()
+
 
     return
 
@@ -389,5 +421,28 @@ plots_windows = fft_over_windows(composite_wave["time array"],composite_wave["wa
 
 
 
+# Integrate in frequency
 
-    
+def integrate_in_small_windows(B,freq,time):
+
+    n_f = len(freq)
+
+    n_bins = len(time)
+
+    dist=[]
+
+    for n in range(n_f):
+        high_res_bint=0 
+        # Integrate in frequency 
+        for m in range(n_bins-1):
+                
+            high_res_bint = high_res_bint + 0.5*(B[m,n]+B[m+1,n])*(time[m+1]-time[m])
+                    
+        dist.append(high_res_bint)
+
+    return dist
+
+
+integrated_windows = integrate_in_small_windows(comp_windows_fft["FFT_psd"],comp_windows_fft["FFT_frequencies"],comp_windows_fft["time array"])
+
+do_comparison = comparison_plot(composite_wave["FFT_frequencies"],composite_wave["FFT_psd"],comp_windows_fft["FFT_frequencies"],integrated_windows)
