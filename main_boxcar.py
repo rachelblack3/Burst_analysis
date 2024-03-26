@@ -17,7 +17,7 @@ import h5py
 # other numerical tools
 import os
 import glob
-from datetime import datetime,date,timedelta
+from datetime import datetime,date,timedelta,time
 
 # for FFT
 import fft_box as ft
@@ -25,6 +25,9 @@ import get_date as gd
 
 # my own misc. functions
 import funcs as funcs
+
+# import class for holding all the FFT data 
+from funcs import FFTMagnitude
 
 """ Defining all global variables 
 
@@ -40,8 +43,6 @@ NOTE: 'burst' is the local burst file name
 'burst_times'   - List of all burst samples on a given day; datetime elements 
 
 """
-
-
 
 ''' Tell me the date range - start date and end date. Function will also return the number days this range spans '''
 start_date,end_date,no_days = funcs.what_dates()
@@ -112,8 +113,6 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
 
         for cdf in cdfs:
             j = j+1
-            if j>1:
-                break
 
             # Open burst file
             burst = pycdf.CDF(cdf)
@@ -127,24 +126,27 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
 
             # Count how many records on each CDF
             no_rec = len(burst['Epoch'])
-
+            burst_epoch = funcs.epoch_convert(burst['Epoch'])
         
             B_cal = burst['BCalibrationCoef']       # B callibration values (for each of 6500 frequencies, regulary spaced)
             df_cal = burst['CalFrequencies'][0]     # Frequency step size required for burst callibaration
             f_max = burst['CalFrequencies'][-1]     # Max frequency (where the receivers 'cuttoff')
 
+            # this is just for the callibartion coefficients
             burst_params = {
                 "B_cal": B_cal,
                 "df_cal": df_cal,
                 "f_max": f_max}
 
+            time_range = [time(hour = 6,minute = 0,second=0),time(hour = 6,minute = 10,second=0)]
             # Now churning through each record in a given CDF
             for i in range(no_rec):
-                if i>22:
-                    break
-                if 19<i<22:
+                if (time_range[0]< burst_epoch[i].time() <time_range[1]):
+                    #break
+                #if 19<i<22:
+                    print(i+1, " bursts have now been identified")
 
-                    # date parameters for passing to functions more easily
+                # date parameters for passing to functions more easily
                     date_params = {
                         "year": year,
                         "month": month,
@@ -162,14 +164,14 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     Bu_sample = burst['BuSamples'][i]
                     Bv_sample = burst['BvSamples'][i]
                     Bw_sample = burst['BwSamples'][i]
-
+            
 
                     ''' Doing FFTs of the 0.468s samples from the burst sample
                         The ACTUAL survey is taken from the first 0.468s of the burst
                         Doing this for multiple other random sections of the burst 
                     '''   
 
-                    rebinned_468, mag_46, params_468 = funcs.process_Kletzing_windows(
+                    rebinned_468, mag_468, params_468 = funcs.process_Kletzing_windows(
                             Bu_sample,Bv_sample,Bw_sample,
                             burst_params,
                             date_params,
@@ -182,7 +184,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     
                     mag_030,params_030 = funcs.process_small_windows(Bu_sample,Bv_sample,Bw_sample,
                             burst_params)  
-                         
+                            
 
 
                     ''' Comparing the first 0.468s window to the average of the first 0.468s of 0.030s windows
@@ -212,7 +214,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     g1.append(funcs.calc_gyro(mag_file,time_s)[0])
                     ghalf.append(funcs.calc_gyro(mag_file,time_s)[1])
                     glow.append(funcs.calc_gyro(mag_file,time_s)[2])
-                   
+                    
 
                     data_set.append(mag_030)
                     freq_set.append(params_030["freq"])
@@ -229,7 +231,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                             
                     b_box.append(burst_int)    
 
-                   
+                    
                     """ Do the Kletzing FFT for first 12 0.468s samples """
 
                     box_dist,color_samples,reb_sancheck = funcs.box_dist(Bu_sample,Bv_sample,Bw_sample,B_cal,
@@ -258,18 +260,12 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     high_b.append(dist)
                     
                     print('The standard deviation of the burst sample distribution is',np.std(box_dist))
-                
+            
 
     """ 
     Plot results
     """
 
-        # integrating in time
-        #rachel_int=[]
-        
-        #for k in range(len(freq)):
-            #    rachel_int.append(np.sum(mag[:,k])/5.968)
-    print(np.shape(box_dist))
     epoch_survey = funcs.epoch_convert(survey['Epoch'])
     lanl_d= h5py.File(funcs.lanl_data(start_date,year,month,day))
     summaries = pls.summary_plot(freq_set,data_set,

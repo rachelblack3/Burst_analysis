@@ -10,7 +10,7 @@ def fft_dat(udata,vdata,wdata,Bcal,df_cal, f_max):
     import numpy as np
 
    
-    N = 208896                                                            # Number of sample points
+    N = len(udata)                                                       # Number of sample points
     box_size = 1024                                                      # Number of samples in each box 
     N_box = int(N/box_size)                                              # Number of boxes
     half_window = int(box_size/2)                                        # Size of half-window
@@ -88,8 +88,6 @@ def fft_dat(udata,vdata,wdata,Bcal,df_cal, f_max):
 
     T_window = box_size*T
 
-    print('the frequency bands for little bins are',df)
-
     return fft_av,freq, wms, n_bins, df,T_window
 
 
@@ -125,7 +123,6 @@ def fft_short(udata,vdata,wdata,Bcal):
     """
     freq = fftfreq(N, T)[1:n_f+1]
     df = freq[1]-freq[0]
-    print('the frequency bands fir the big windows is',df)
 
     """ 
     Putting the calibration coeffcients into complex form

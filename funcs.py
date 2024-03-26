@@ -6,6 +6,39 @@ import pandas as pd
 from spacepy import pycdf
 import fft_box as ft
 
+# Class for the reuslts from windowed FFTs 
+
+class FFTMagnitude:
+    ''' class for storing instances of windowed FFT results, where window size and rolling window shift can be altered 
+    
+            PARAMETERS:
+            magnitude: 2D array of FFT spectra, with shape (time_bins, frequency_bins) 
+            frequency: central frequencies for each frequency band (Hz)
+            n_window:  parameter deciding window size (window size = total number of samples/n_window)
+            n_rolling: number of samples between rolling window '''
+
+    def __init__(self,magnitude,frequency,n_window,n_rollling):
+        self.magnitude=magnitude
+        self.frequency=frequency
+        self.n_window = n_window
+        self.n_rolling = n_rollling
+
+    def show_magnitude(self):
+        print(f"The dimensions (time bins, frequency bins) of this FFT spectra is: {self.magnitude.shape}")
+
+    def show_frequency(self):
+        print(f"The number of frequencies is: {len(self.frequency)}")
+
+    def __repr__(self):
+
+        return f"magnitude shape = {self.magnitude.shape}, freq"
+
+# Example showing how this works
+test = FFTMagnitude(np.asarray([1,2]), [6],10,100)
+test.show_frequency()
+test.show_magnitude()
+print(test.magnitude)
+
 def what_dates():
 
     ''' Function that asks command prompt the required date range
@@ -200,7 +233,7 @@ def omni_stats(start_date,end_date):
     AE=[]
     epoch_omni=[]
     Kp=[]
-    print('the start is',start_date,end_date)
+    print('the start and end are',start_date,end_date)
     start= str(start_date.strftime("%Y-%m-%d"))
     
     no_days = end_date - start_date
@@ -314,7 +347,7 @@ def box_dist(Bu,Bv,Bw,B_cal,
 
     mag_list = np.zeros((n_b,5600))
     san_check=[]
-    print('is this where the difference is - in box_dist?',Bu)
+    
     for i in range(n_b):
 
 
@@ -432,7 +465,7 @@ def process_Kletzing_windows(Bu_sample,Bv_sample,Bw_sample,
     do rebinning in semi-logarithmic bins
     """
 
-    rebinned = rebin_burst(file_access["survey"],mag,freq,single_day,year,month,day)
+    rebinned = rebin_burst(file_access["survey_file"],mag,freq,single_day,year,month,day)
 
     params_468 = {
         "freq": freq,
@@ -501,7 +534,7 @@ def process_small_windows(Bu_sample,Bv_sample,Bw_sample,
     """ 
     calling short FFT routine
     """
-    fft_arr, freq, wms, n_bins, df,Twin = ft.fft_dat(Bu_sample,Bv_sample,Bw_sample,burst_params["b_cal"],burst_params["df_cal"], burst_params["f_max"])
+    fft_arr, freq, wms, n_bins, df,Twin = ft.fft_dat(Bu_sample,Bv_sample,Bw_sample,burst_params["B_cal"],burst_params["df_cal"], burst_params["f_max"])
 
     """ 
     take absolute values and square to get power density
@@ -537,6 +570,102 @@ def process_small_windows(Bu_sample,Bv_sample,Bw_sample,
 
     return mag,params_030
 
+""" FFT with sliding overlapping windows """
+
+def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
+                            burst_params,f_s,slider):
+    from scipy.fft import fft, fftfreq,rfftfreq
+    import numpy as np
+
+    N = len(Bu_sample)                                                       # Number of sample points
+    box_size = 1024 #int(N/n_windows)                                          # Number of samples in each box 
+  
+    n_bins = int((N - (box_size - slider))/slider)
+
+
+    """ 
+    Frequencies from FFT boxes
+    """
+    
+    freq = rfftfreq(box_size, f_s)[:box_size//2]
+    n_f = len(freq)
+
+    df = freq[1] - freq[0]
+
+
+    """ 
+    Putting the calibration coeffcients into complex form
+    """
+    cal_step = int(df/burst_params["df_cal"])
+    Bcal_c=[]
+    
+    for i in range(n_f):
+        f = freq[i]
+        if (f < burst_params["f_max"]):
+            Bcal_c.append(complex(burst_params["B_cal"][i*cal_step,0],burst_params["B_cal"][i*cal_step,1]))
+        else:
+            break
+
+    n_f = len(Bcal_c)
+
+    # Cutting off frequencies where the reciever stopped picking them up (fmax from callibration specifications)
+    freq = freq[0:n_f]                                  
+    """ 
+    Do FFTs - remember to normalise by N and multiply by hanning window and complex correction
+    """
+
+    fft_box = np.zeros((n_bins,n_f,3),dtype = complex)
+
+    w = np.hanning(box_size)                                            # hanning window
+    wms = np.mean(w**2)                                                 # hanning window correction
+
+    # Remember to normalise the box size
+        
+    lower_edge = 0
+    upper_edge = box_size
+    i = 0 
+
+    while upper_edge<N:
+
+        fft_box[i,:,0] = (fft(w*(1/box_size)*Bu_sample[lower_edge:upper_edge]))[0:box_size//2]*Bcal_c  
+        fft_box[i,:,1] = (fft(w*(1/box_size)*Bv_sample[lower_edge:upper_edge]))[0:box_size//2]*Bcal_c
+        fft_box[i,:,2] = (fft(w*(1/box_size)*Bw_sample[lower_edge:upper_edge]))[0:box_size//2]*Bcal_c
+        
+        lower_edge += slider
+        upper_edge += slider
+
+        i += 1
+
+    fft_av = fft_box
+   
+    T_window = box_size*f_s
+
+    print('the frequency bands for little bins are',df)
+
+    """ 
+    take absolute values and square to get power density
+    """
+    total = abs(fft_av) * abs(fft_av)
+
+    """ 
+    divide array by correction for spectral power lost by using a hanning window
+    """
+    total= total/wms
+    
+    """ 
+    find B field magnitude
+    """
+    
+    mag = total*2*T_window
+
+    """ 
+    define the time array for plotting
+    """
+    duration = N*f_s
+    t_array = np.linspace(0.,duration- f_s, n_bins)
+
+    return mag,freq,fft_av,t_array,df
+
 
 def integrate_in_rebin(B,survey_freq):
 
@@ -553,7 +682,33 @@ def integrate_in_small_windows(B,params_030):
     n_f = params_030["n_f"]
     n_bins = params_030["n_bins"]
 
+    frequency_integral = np.zeros(n_bins)
+    
+    for n in range(n_bins):
+        high_res_bint=0 
+
+        # Integrate in frequency 
+        for m in range(1,n_f-1):
+                
+            high_res_bint = high_res_bint + 0.5*(B[n,m]+B[n,m+1])*(freq[m+1]-freq[m])
+                    
+        frequency_integral[n] = high_res_bint
+
+    max_amplitude = np.max(np.sqrt(frequency_integral))
+
+    integral_statistics = {"maximum amplitude": max_amplitude,
+                           "mean power": np.mean(frequency_integral),
+                           "median power": np.median(frequency_integral),
+                           "power vairaince": np.std(frequency_integral)**2,
+                           "frequency integrated power": frequency_integral}
+
+    return frequency_integral, integral_statistics
+
+
+
+
     dist=[]
+
 
     for n in range(n_bins):
         high_res_bint=0 
