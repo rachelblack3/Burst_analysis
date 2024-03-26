@@ -6,6 +6,144 @@ import pandas as pd
 from spacepy import pycdf
 import fft_box as ft
 
+
+class DataFiles:
+    ''' class for accessing all of the data files that I need on a given day.  
+    
+            PARAMETERS:
+            date: DateTime object 
+           '''
+
+    def __init__(self,date):
+        self.date = date
+        
+
+    # finding survey data filepath for given day
+    @property
+    def survey_data(self):
+    
+        # String version of dates for filename  
+        date_string,year,month,day =self.get_date_string()
+
+        # root folder
+        survey_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/L2'
+        # 'stem' name for burst CDFs
+        survey_file= 'rbsp-a_WFR-spectral-matrix-diagonal_emfisis-L2_'
+
+        survey_path = os.path.join(survey_folder, year, month, day,survey_file + date_string + "_v*.cdf")
+        
+        # find the latest version
+        survey_path = glob.glob(survey_path)[-1]
+        
+        return survey_path
+
+
+    # finding the magnetic data filepath for given day
+    @property
+    def magnetic_data(self):
+
+        # String version of dates for filename  
+        date_string,year,month,day =self.get_date_string()
+
+        # root folder
+        l3_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/L3'
+        # 'stem' name for burst CDFs
+        l3_file= 'rbsp-a_magnetometer_1sec-geo_emfisis-L3_'
+
+        l3_path = os.path.join(l3_folder, year, month, day,l3_file + date_string + "_v*.cdf")
+
+        # find the latest version
+        l3_path = glob.glob(l3_path)[-1]
+        
+        return l3_path
+
+    # finding the LANL data filepath for given day 
+    @property
+    def lanl_data(self):
+        # String version of dates for filename  
+        date_string,year,month,day =self.get_date_string()
+
+        # root folder
+        lanl_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/LANL/MagEphem'
+        # 'stem' name for burst CDFs
+        lanl_file= 'rbspa_def_MagEphem_TS04D_'
+
+        lanl_path = os.path.join(lanl_folder, year, lanl_file + date_string + "_v*.h5")
+
+        # find the latest version
+        lanl_path = glob.glob(lanl_path)[-1]
+        
+        return lanl_path
+
+    # Get L4 data filepath (aka density file) for given day
+    @property
+    def l4_data(self):
+
+        # String version of dates for filename  
+        date_string,year,month,day =self.get_date_string()
+
+        # root folder
+        l4_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/L4'
+        # 'stem' name for burst CDFs
+        l4_file= 'rbsp-a_density_emfisis-L4_'
+
+        l4_path = os.path.join(l4_folder, year, month, day,l4_file + date_string + "_v*.cdf")
+
+        # find the latest version
+        l4_path = glob.glob(l4_path)[-1]
+        
+        return l4_path
+    
+    # Get burst filepaths for all CDFs on given day
+    @property
+    def burst_paths(self):
+
+        # root folder
+        wfr_folder ='/data/spacecast/wave_database_v2/RBSP-A/L2'
+
+        # 'stem' name for burst CDFs
+        burst6 = 'rbsp-a_WFR-waveform-continuous-burst_emfisis-L2_'
+
+        # String version of dates for filename  
+        date_string,year,month,day =self.get_date_string()
+
+        # Full filepath
+        wfr_burst_path = os.path.join(wfr_folder, year, month, day, burst6 + date_string + "*_v*.cdf")
+
+        # files are all CDFs for a given day
+        cdf_files= glob.glob(wfr_burst_path)
+
+        return cdf_files
+
+    def get_date_string(self):
+        ''' Method that rpovides date strings
+        Outputs:
+    
+        date_string: string object of date
+        year: string object of date year
+        month: string object of date month
+        day: string object of date day '''
+
+        date_string= str(self.date.strftime("%Y%m%d"))
+
+        if (self.date.day <10):
+            day = "0"+str(self.date.day)
+        else:
+            day = str(self.day)
+
+
+        if (self.date.month<10):
+            month = "0"+str(self.date.month)
+        else:
+            month = str(self.date.month)
+        
+
+        year = str(self.date.year)
+        
+        return date_string,year,month,day
+
+
+
 # Class for the reuslts from windowed FFTs 
 
 class FFTMagnitude:
@@ -573,10 +711,11 @@ def process_small_windows(Bu_sample,Bv_sample,Bw_sample,
 """ FFT with sliding overlapping windows """
 
 def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
-                            burst_params,f_s,slider):
+                            burst_params,slider):
     from scipy.fft import fft, fftfreq,rfftfreq
     import numpy as np
 
+    f_s = 1.0/35000.0 
     N = len(Bu_sample)                                                       # Number of sample points
     box_size = 1024 #int(N/n_windows)                                          # Number of samples in each box 
   
@@ -664,6 +803,15 @@ def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
     duration = N*f_s
     t_array = np.linspace(0.,duration- f_s, n_bins)
 
+    params_030 = {
+        "freq": freq,
+        "n_bins": n_bins,
+        "df": df,
+        "n_f": n_f,
+        "n_bins": n_bins,
+        "time_array": t_array
+    } 
+
     return mag,freq,fft_av,t_array,df
 
 
@@ -702,24 +850,9 @@ def integrate_in_small_windows(B,params_030):
                            "power vairaince": np.std(frequency_integral)**2,
                            "frequency integrated power": frequency_integral}
 
-    return frequency_integral, integral_statistics
+    return integral_statistics
 
 
-
-
-    dist=[]
-
-
-    for n in range(n_bins):
-        high_res_bint=0 
-        # Integrate in frequency 
-        for m in range(1,n_f-1):
-                
-            high_res_bint = high_res_bint + 0.5*(B[n,m]+B[n,m+1])*(freq[m+1]-freq[m])
-                    
-        dist.append(high_res_bint)
-
-    return dist
 
 def spectrum_averaging(mag_030,params_030,file_access,date_params):
 
