@@ -129,7 +129,7 @@ class DataFiles:
         if (self.date.day <10):
             day = "0"+str(self.date.day)
         else:
-            day = str(self.day)
+            day = str(self.date.day)
 
 
         if (self.date.month<10):
@@ -142,7 +142,42 @@ class DataFiles:
         
         return date_string,year,month,day
 
+class AccessSurveyAttributes:
+    ''' Class for finding and working on Survey data attributes
+     
+      PARAMETERS:
+      survey_cdf: A CDF containing all survey data '''
 
+    def __init__(self, survey_cdf):
+        self.survey_cdf = survey_cdf
+
+    @property
+    def frequency(self):
+        # Frequency in Hz
+        frequency = self.survey_cdf['WFR_frequencies'][0]
+
+        return frequency
+    
+    @property
+    def epoch(self):
+        # Epoch in DateTime format of: 
+        epoch = self.survey_cdf['Epoch']
+
+        return epoch
+    
+    def epoch_convert(self):
+    # get epoch in correct format for comparisons etc.
+        epoch = []
+
+        # First - saving the epoch elements to a list as a string - acording to a particular desired format
+        for i in range(len(self.survey_cdf['Epoch'])):
+            epoch.append(datetime.strftime(self.survey_cdf['Epoch'],'%Y-%m-%d %H-%M-%S'))
+
+        # Chaning back to a datetime object of same format    
+        for i in range(len(epoch)):
+            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+
+        return(epoch)
 
 # Class for the reuslts from windowed FFTs 
 
@@ -710,8 +745,7 @@ def process_small_windows(Bu_sample,Bv_sample,Bw_sample,
 
 """ FFT with sliding overlapping windows """
 
-def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
-                            burst_params,slider):
+def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,slider,burst_params):
     from scipy.fft import fft, fftfreq,rfftfreq
     import numpy as np
 
@@ -766,9 +800,9 @@ def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
 
     while upper_edge<N:
 
-        fft_box[i,:,0] = (fft(w*(1/box_size)*Bu_sample[lower_edge:upper_edge]))[0:box_size//2]*Bcal_c  
-        fft_box[i,:,1] = (fft(w*(1/box_size)*Bv_sample[lower_edge:upper_edge]))[0:box_size//2]*Bcal_c
-        fft_box[i,:,2] = (fft(w*(1/box_size)*Bw_sample[lower_edge:upper_edge]))[0:box_size//2]*Bcal_c
+        fft_box[i,:,0] = (fft(w*(1/box_size)*Bu_sample[lower_edge:upper_edge]))[:n_f]*Bcal_c  
+        fft_box[i,:,1] = (fft(w*(1/box_size)*Bv_sample[lower_edge:upper_edge]))[:n_f]*Bcal_c
+        fft_box[i,:,2] = (fft(w*(1/box_size)*Bw_sample[lower_edge:upper_edge]))[:n_f]*Bcal_c
         
         lower_edge += slider
         upper_edge += slider
@@ -794,9 +828,15 @@ def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
     """ 
     find B field magnitude
     """
-    
-    mag = total*2*T_window
+    PSD = np.zeros((n_bins,n_f))
 
+    for n in range(n_f):
+        for m in range(n_bins):
+
+            # Multiply by 2 to account for negative freqiencies from FFT 
+            # Divide by frequency step size to have a PSD in units/Hz 
+            PSD[m,n]=(total[m,n,0]+total[m,n,1]+total[m,n,2])*2*T_window  
+    
     """ 
     define the time array for plotting
     """
@@ -812,7 +852,7 @@ def process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,
         "time_array": t_array
     } 
 
-    return mag,freq,fft_av,t_array,df
+    return PSD,params_030
 
 
 def integrate_in_rebin(B,survey_freq):
@@ -839,7 +879,7 @@ def integrate_in_small_windows(B,params_030):
         for m in range(1,n_f-1):
                 
             high_res_bint = high_res_bint + 0.5*(B[n,m]+B[n,m+1])*(freq[m+1]-freq[m])
-                    
+
         frequency_integral[n] = high_res_bint
 
     max_amplitude = np.max(np.sqrt(frequency_integral))

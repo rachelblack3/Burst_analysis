@@ -27,7 +27,7 @@ import get_date as gd
 import funcs as funcs
 
 # import class for holding all the FFT data 
-from funcs import FFTMagnitude
+from funcs import FFTMagnitude, DataFiles, AccessSurveyAttributes
 
 """ Defining all global variables 
 
@@ -60,23 +60,31 @@ epoch_omni,AE=funcs.omni_stats(start_date,end_date)
 
 for single_day in (start_date + timedelta(n) for n in range(no_days)):
     
+    day_files = DataFiles(single_day)
+
     # String version of dates for filename  
     date_string,year,month,day =funcs.get_date_string(single_day)
 
     # Full filepath
     wfr_burst_path = os.path.join(wfr_folder, year, month, day, burst6 + date_string + "*_v*.cdf")
 
-    # Accessing the magnetometer data
+    # Getting the magnetometer data
+ 
+    mag_file = pycdf.CDF(day_files.magnetic_data)
 
-    mag_file=pycdf.CDF(funcs.magnetic_data(single_day,year,month,day))   
+    # Getting the LANL data
 
-    # Accessing survey file and defibing survey frequencies
+    lanl_file = h5py.File(day_files.lanl_data)
+ 
+    # Getting survey file and accessing survey frequencies
 
-    survey = pycdf.CDF(ft.survey_data(single_day,year,month,day)) 
-    survey_freq = survey['WFR_frequencies'][0]
+    #survey = pycdf.CDF(ft.survey_data(single_day,year,month,day)) 
+    survey_file = pycdf.CDF(day_files.survey_data)
+    survey_freq = AccessSurveyAttributes(survey_file).frequency
 
     # files are all CDFs for a given day
-    cdfs = glob.glob(wfr_burst_path)
+    #cdfs = glob.glob(wfr_burst_path)
+    cdfs = day_files.burst_paths
     no_cdf = len(cdfs)
 
     # Define empty list for storing number of records in each CDF
@@ -117,10 +125,9 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
             # Open burst file
             burst = pycdf.CDF(cdf)
 
-
             # files for passing to functions more easily
             file_access = {
-                "survey_file": survey,
+                "survey_file": survey_file,
                 "burst_file": burst,
                 "mag_file": mag_file}
 
@@ -185,7 +192,9 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     mag_030,params_030 = funcs.process_small_windows(Bu_sample,Bv_sample,Bw_sample,
                             burst_params)  
                             
-
+                    slider = int(1024/4)
+                    
+                    mag_030,params_030 = funcs.process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,slider,burst_params)
 
                     ''' Comparing the first 0.468s window to the average of the first 0.468s of 0.030s windows
                     '''              
@@ -195,7 +204,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     for m in range(params_030["n_f"]):
                         av_comparison[m] = np.mean(mag_030[:61,m])
                     
-                    rebinned_comp = funcs.rebin_burst(survey,av_comparison,params_030["freq"],single_day,year,month,day)
+                    rebinned_comp = funcs.rebin_burst(survey_file,av_comparison,params_030["freq"],single_day,year,month,day)
                     
 
                     """ 
@@ -208,7 +217,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
 
                     # First find survey time for rec
 
-                    time_s, surv_index= funcs.surv_burst(burst['Epoch'][i],survey['Epoch'])
+                    time_s, surv_index= funcs.surv_burst(burst['Epoch'][i],AccessSurveyAttributes(survey_file).epoch)
 
                     # Then add calculated fractions of the gyrofrequency to their respective lists
                     g1.append(funcs.calc_gyro(mag_file,time_s)[0])
@@ -235,7 +244,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     """ Do the Kletzing FFT for first 12 0.468s samples """
 
                     box_dist,color_samples,reb_sancheck = funcs.box_dist(Bu_sample,Bv_sample,Bw_sample,B_cal,
-                                                survey,survey_freq,
+                                                survey_file,survey_freq,
                                                 year,month,day,
                                                 single_day)
                     
@@ -248,7 +257,7 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
 
                     """" Do the high burst integration """
 
-                    dist = funcs.integrate_in_small_windows(mag_030,params_030)
+                    intergral_statistics = funcs.integrate_in_small_windows(mag_030,params_030)
 
                     """ Averaging the 0.03s windows """
 
@@ -257,26 +266,52 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
 
                     av_specs_win.append(av_rebinned_win)
 
-                    high_b.append(dist)
+                    high_b.append(intergral_statistics["frequency integrated power"])
                     
                     print('The standard deviation of the burst sample distribution is',np.std(box_dist))
-            
 
+
+
+    epoch_survey = AccessSurveyAttributes(survey_file).epoch_convert()
+
+
+    plotting_dict = {"Frequencies for sliding windows": freq_set,
+                     "PSD for sliding windows":data_set,
+                     "0.5 gyrofrequency": ghalf,
+                     "0.05 gyrofrequency": glow,
+                     "Gyrofrequency": g1,
+                     "Survey frequencies": survey_freq,
+                     "Survey epoch": epoch_survey,
+                     "survey PSD": Btotal,
+                     "Timestamps on bursts": burst_times,
+                     "LANL_dict": lanl_file,
+                     "AE": AE,
+                     "OMNI epoch": epoch_omni,
+                     "Year":year,
+                     "Month": month,
+                     "Day": day,
+                     "Survey integral":s,
+                     "First 0.468s FFT integral": b_box,
+                     "0.468s window powers": b_dist,
+                     "Sliding window integraed power":high_b,
+                     "PSD of 0.468s windows": color_plots,
+                     "Frequencies for 0.468s windows": params_468["freq"],
+                     "Power averaged over small windows": av_specs,
+                     "Power averaged over first 0.468s": av_specs_win,
+                     "Survey PSD for each day": surv_set}
+            
     """ 
     Plot results
     """
-
-    epoch_survey = funcs.epoch_convert(survey['Epoch'])
-    lanl_d= h5py.File(funcs.lanl_data(start_date,year,month,day))
     summaries = pls.summary_plot(freq_set,data_set,
-                                ghalf,glow,g1,
-                                survey_freq,epoch_survey,Btotal,
-                                burst_times,
-                                lanl_d,AE,epoch_omni,
-                                year,month,day,
-                                s,
-                                b_box,
-                                b_dist,
-                                high_b,
-                                color_plots,params_468["freq"],
-                                av_specs,av_specs_win,surv_set)
+                 ghalf,glow,g1,
+                 survey_freq,epoch_survey,Btotal,
+                 burst_times,
+                 lanl_file,AE,epoch_omni,
+                 year,month,day,
+                 survey_int,
+                 burst_int,
+                 b_dist,
+                 high_b,
+                 color_plots,params_468["freq"],
+                 av_specs,av_specs_win,surv_set)
