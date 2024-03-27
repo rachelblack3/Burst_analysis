@@ -178,39 +178,356 @@ class AccessSurveyAttributes:
             epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
 
         return(epoch)
+    
+class PerfromFFT:
+    ''' class for storing all methods related to performing FFTs'''
+
+    def _init_(self,
+               waveform_samples,
+               burst_params,
+               slider):
+
+        self.waveform_samples = waveform_samples # Bu, Bv, Bw
+        self.burst_params = burst_params         # B_cal, df_cal, f_max
+        self.slider = slider
+    
+    def process_Kletzing_windows(self):
+        from scipy.fft import fft,rfftfreq
+        import numpy as np
+    
+        """ Doing the FFT porcess identical to that on board the PBSP (Kletzing, 2023)
+        In other words, using a 0.468s window from the beginning of the 6s burst sample, and rebinning into semu-logirtihmic bins
+
+        Defining key parameters:
+
+        'N_short'            - number of points in 0.468s window; integer
+        'fft'                - results of the FFT; complex nT/Hz
+        'freq'               - frequencies resulting from the FFT; Hz
+        'wms'                - correction to the FFT power spectral densities required as a result of the Hanning window
+        'Twin'               - temporal duration of window; s
+
+        Outputs:
+
+        'mag'               - corrected magnetic spectral density in frequency bins from FFT process; nT/Hz
+
+        """
+
+        """ 
+        calling long FFT routine
+
+        """
+        Bu = self.waveform_samples["Bu"]
+        Bv = self.waveform_samples["Bv"]
+        Bw= self.waveform_samples["Bw"]
+        
+        f_s = 1.0/35000.0 
+        N = len(Bu)                                                     # Number of sample points
+        box_size = 16384                                                # Number of samples in each box 
+        n_bins =  int(N/box_size)                                                      # Number of points in temporal space
+
+        """ 
+        calling long FFT routine
+
+        """
+        """ 
+        Frequencies from FFT boxes
+        """
+        
+        freq = rfftfreq(box_size, f_s)[:box_size//2]
+        n_f = len(freq)
+
+        df = freq[1] - freq[0]
+
+        """ 
+        Putting the calibration coeffcients into complex form
+        """
+        cal_step = int(df/self.burst_params["df_cal"])
+        Bcal_c=[]
+        
+        for i in range(n_f):
+            f = freq[i]
+            if (f < self.burst_params["f_max"]):
+                Bcal_c.append(complex(self.burst_params["B_cal"][i*cal_step,0],self.burst_params["B_cal"][i*cal_step,1]))
+            else:
+                break
+        
+        # Resetting number of frequencies to f_max - i.e. Cutting off frequencies where the reciever stopped picking them up (fmax from callibration specifications))
+        n_f = len(Bcal_c)
+        freq = freq[0:n_f]  
+
+        """ 
+        Do FFTs - remember to normalise by N and multiply by hanning window and complex correction
+        """
+
+        fft_box = np.zeros((n_bins,n_f,3),dtype = complex)
+
+        w = np.hanning(box_size)                                            # hanning window
+        wms = np.mean(w**2)                                                 # hanning window correction
+
+        # Remember to normalise the box size
+            
+        lower_edge = 0
+        upper_edge = box_size
+        i = 0 
+
+        while upper_edge<N:
+
+            fft_box[i,:,0] = (fft(w*(1/box_size)*Bu[lower_edge:upper_edge]))[:n_f]*Bcal_c  
+            fft_box[i,:,1] = (fft(w*(1/box_size)*Bv[lower_edge:upper_edge]))[:n_f]*Bcal_c
+            fft_box[i,:,2] = (fft(w*(1/box_size)*Bw[lower_edge:upper_edge]))[:n_f]*Bcal_c
+            
+            lower_edge += self.slider
+            upper_edge += self.slider
+
+            i += 1
+
+        fft_av = fft_box
+    
+        T_window = box_size*f_s
+
+        print('the frequency bands for little bins are',df)
+
+        """ 
+        take absolute values and square to get power density
+        """
+        total = abs(fft_av) * abs(fft_av)
+
+        """ 
+        divide array by correction for spectral power lost by using a hanning window
+        """
+        total= total/wms
+        
+        """ 
+        find B field magnitude
+        """
+        PSD = np.zeros((n_bins,n_f))
+
+        for n in range(n_f):
+            for m in range(n_bins):
+
+                # Multiply by 2 to account for negative freqiencies from FFT 
+                # Divide by frequency step size to have a PSD in units/Hz 
+                PSD[m,n]=(total[m,n,0]+total[m,n,1]+total[m,n,2])*2*T_window  
+        
+        """ 
+        define the time array for plotting
+        """
+        duration = n_bins*T_window
+        t_array = np.linspace(0.,duration, n_bins)
+
+        fft_params = {
+            "freq": freq,
+            "df": df,
+            "n_f": n_f,
+            "n_bins": n_bins,
+            "PSD": PSD,
+            "time_array": t_array 
+            } 
+
+        return fft_params
+    
+
+    """ FFT with sliding overlapping windows """
+
+    def process_sliding_windows(self):
+        from scipy.fft import fft,rfftfreq
+        import numpy as np
+
+        Bu = self.waveform_samples["Bu"]
+        Bv = self.waveform_samples["Bv"]
+        Bw = self.waveform_samples["Bw"]
+
+        f_s = 1.0/35000.0 
+        N = len(Bu)                                                     # Number of sample points
+        box_size = 1024                                                 # Number of samples in each box 
+        n_bins = int((N - (box_size - self.slider))/self.slider)        # Number of points in temporal space
+
+
+        """ 
+        Frequencies from FFT boxes
+        """
+        
+        freq = rfftfreq(box_size, f_s)[:box_size//2]
+        n_f = len(freq)
+
+        df = freq[1] - freq[0]
+
+
+        """ 
+        Putting the calibration coeffcients into complex form
+        """
+        cal_step = int(df/self.burst_params["df_cal"])
+        Bcal_c=[]
+        
+        for i in range(n_f):
+            f = freq[i]
+            if (f < self.burst_params["f_max"]):
+                Bcal_c.append(complex(self.burst_params["B_cal"][i*cal_step,0],self.burst_params["B_cal"][i*cal_step,1]))
+            else:
+                break
+        
+        # Resetting number of frequencies to f_max - i.e. Cutting off frequencies where the reciever stopped picking them up (fmax from callibration specifications))
+        n_f = len(Bcal_c)
+        freq = freq[0:n_f]  
+
+        """ 
+        Do FFTs - remember to normalise by N and multiply by hanning window and complex correction
+        """
+
+        fft_box = np.zeros((n_bins,n_f,3),dtype = complex)
+
+        w = np.hanning(box_size)                                            # hanning window
+        wms = np.mean(w**2)                                                 # hanning window correction
+
+        # Remember to normalise the box size
+            
+        lower_edge = 0
+        upper_edge = box_size
+        i = 0 
+
+        while upper_edge<N:
+
+            fft_box[i,:,0] = (fft(w*(1/box_size)*Bu[lower_edge:upper_edge]))[:n_f]*Bcal_c  
+            fft_box[i,:,1] = (fft(w*(1/box_size)*Bv[lower_edge:upper_edge]))[:n_f]*Bcal_c
+            fft_box[i,:,2] = (fft(w*(1/box_size)*Bw[lower_edge:upper_edge]))[:n_f]*Bcal_c
+            
+            lower_edge += self.slider
+            upper_edge += self.slider
+
+            i += 1
+
+        fft_av = fft_box
+    
+        T_window = box_size*f_s
+
+        print('the frequency bands for little bins are',df)
+
+        """ 
+        take absolute values and square to get power density
+        """
+        total = abs(fft_av) * abs(fft_av)
+
+        """ 
+        divide array by correction for spectral power lost by using a hanning window
+        """
+        total= total/wms
+        
+        """ 
+        find B field magnitude
+        """
+        PSD = np.zeros((n_bins,n_f))
+
+        for n in range(n_f):
+            for m in range(n_bins):
+
+                # Multiply by 2 to account for negative freqiencies from FFT 
+                # Divide by frequency step size to have a PSD in units/Hz 
+                PSD[m,n]=(total[m,n,0]+total[m,n,1]+total[m,n,2])*2*T_window  
+        
+        """ 
+        define the time array for plotting
+        """
+        duration = N*f_s
+        t_array = np.linspace(0.,duration- f_s, n_bins)
+
+        fft_params = {
+            "freq": freq,
+            "df": df,
+            "n_f": n_f,
+            "n_bins": n_bins,
+            "PSD": PSD,
+            "time_array": t_array 
+            } 
+
+        return fft_params
+            
+        
+
+
 
 # Class for the reuslts from windowed FFTs 
-
-class FFTMagnitude:
-    ''' class for storing instances of windowed FFT results, where window size and rolling window shift can be altered 
+class FFTAnalysis:
+    ''' class for storing all methods related to analysing FFT data
     
             PARAMETERS:
-            magnitude: 2D array of FFT spectra, with shape (time_bins, frequency_bins) 
-            frequency: central frequencies for each frequency band (Hz)
-            n_window:  parameter deciding window size (window size = total number of samples/n_window)
-            n_rolling: number of samples between rolling window '''
+            PSD_Kletzing: 2D array of FFT spectra, with shape (n_bins, frequency_bins) correspnding to 0.468s windows, no overlap
+            Frequency_Kletzing: central frequencies for each frequency band (Hz) '''
+            
+            
 
-    def __init__(self,magnitude,frequency,n_window,n_rollling):
-        self.magnitude=magnitude
-        self.frequency=frequency
-        self.n_window = n_window
-        self.n_rolling = n_rollling
+    def __init__(self,PSD,Frequency,Duration):
+        self.PSD = PSD
+        self.Frequency = Frequency
+        self.Duration = Duration
+        
 
-    def show_magnitude(self):
-        print(f"The dimensions (time bins, frequency bins) of this FFT spectra is: {self.magnitude.shape}")
+    def show_dimensions(self):
+        print(f"The dimensions (time bins, frequency bins) of FFT_Kletzing spectra is: {self.FFT.shape}")
+
 
     def show_frequency(self):
         print(f"The number of frequencies is: {len(self.frequency)}")
 
-    def __repr__(self):
+    def n_f(self):
+        # integer number of frequency bins 
 
-        return f"magnitude shape = {self.magnitude.shape}, freq"
+        n_f = len(self.frequency)
+        return n_f
+    
+    def n_bins(self):
+        # integer number of frequency bins 
+
+        n_f = len(self.frequency)
+        return n_f
+    
+    def integrate_in_frequency(self):
+
+        n_f = len(self.frequency)
+        n_bins = np.shape(self.PSD)[0]
+
+        frequency_integral = np.zeros(n_bins)
+        
+        for n in range(n_bins):
+            high_res_bint=0 
+
+            # Integrate in frequency 
+            for m in range(0,n_f-1):
+                    
+                high_res_bint = high_res_bint + 0.5*(self.PSD[n,m]+self.PSD[n,m+1])*(self.Frequency[m+1]-self.Frequency[m])
+
+            frequency_integral[n] = high_res_bint
+
+        # save the stats for the first 0.468s too
+        if n_bins == 12: 
+            # if FFT_Kletzing, then it's just the first value
+            mean_468s = frequency_integral[0]
+            median_468s = 0.
+            Kletzing = True
+        else:
+            n_468 = int((self.Duration/0.468)*n_bins)
+            mean_468s = np.mean(frequency_integral[:n_468])
+            median_468s = np.median(frequency_integral[:n_468])
+            Kletzing = False
+
+        max_amplitude = np.max(np.sqrt(frequency_integral))
+
+        integral_statistics = {"maximum amplitude": max_amplitude,
+                            "mean power": np.mean(frequency_integral),
+                            "median power": np.median(frequency_integral),
+                            "power vairaince": np.std(frequency_integral)**2,
+                            "frequency integrated power": frequency_integral,
+                            "mean power over 0.468s": mean_468s,
+                            "median power over 0.468s": median_468s,
+                            "Kletzing windows?": Kletzing}
+
+        return integral_statistics
+
 
 # Example showing how this works
-test = FFTMagnitude(np.asarray([1,2]), [6],10,100)
-test.show_frequency()
-test.show_magnitude()
-print(test.magnitude)
+#test = FFTMagnitudeRolling(np.asarray([1,2]), [6],10,100)
+#test.show_frequency()
+#test.show_magnitude()
+#print(test.magnitude)
 
 def what_dates():
 
@@ -296,59 +613,6 @@ def find_closest(epoch_survey,burst_t):
     survey_t=epoch_survey[index_burst]
 
     return(survey_t,index_burst)
-
-
-
-""" survey_data: find path to survey data on that date """
-
-def survey_data(start_date,year,month,day):
-    date_string= str(start_date.strftime("%Y%m%d"))
-    survey_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/L2'
-    survey_file= 'rbsp-a_WFR-spectral-matrix-diagonal_emfisis-L2_'
-    survey_path = os.path.join(survey_folder, year, month, day,survey_file + date_string + "_v*.cdf")
-    
-    # find the latest version
-    survey_path = glob.glob(survey_path)[-1]
-    
-    return survey_path
-
-
-# finding the magnetic data file
-
-def magnetic_data(start_date,year,month,day):
-    date_string= str(start_date.strftime("%Y%m%d"))
-    survey_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/L3'
-    survey_file= 'rbsp-a_magnetometer_1sec-geo_emfisis-L3_'
-    survey_path = os.path.join(survey_folder, year, month, day,survey_file + date_string + "_v*.cdf")
-    # find the latest version
-    survey_path = glob.glob(survey_path)[-1]
-    
-    return survey_path
-
-
-def lanl_data(start_date,year,month,day):
-    date_string= str(start_date.strftime("%Y%m%d"))
-    lanl_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/LANL/MagEphem'
-    lanl_file= 'rbspa_def_MagEphem_TS04D_'
-
-    lanl_path = os.path.join(lanl_folder, year, lanl_file + date_string + "_v*.h5")
-    # find the latest version
-    lanl_path = glob.glob(lanl_path)[-1]
-    
-    return lanl_path
-
-# Get L4 data file (aka density file)
-
-def l4_data(start_date,year,month,day):
-    date_string= str(start_date.strftime("%Y%m%d"))
-    l4_folder ='/data/spacecast/satellite/RBSP/emfisis/data/RBSP-A/L4'
-    l4_file= 'rbsp-a_density_emfisis-L4_'
-
-    l4_path = os.path.join(l4_folder, year, month, day,l4_file + date_string + "_v*.cdf")
-    # find the latest version
-    l4_path = glob.glob(l4_path)[-1]
-    
-    return l4_path
 
 
 def surv_burst(time_b,surv_epoch):

@@ -171,15 +171,17 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                     Bu_sample = burst['BuSamples'][i]
                     Bv_sample = burst['BvSamples'][i]
                     Bw_sample = burst['BwSamples'][i]
-            
+                    
+                    Bsamples = {"Bu": Bu_sample,
+                               "Bv": Bv_sample,
+                               "Bw": Bw_sample}
 
                     ''' Doing FFTs of the 0.468s samples from the burst sample
                         The ACTUAL survey is taken from the first 0.468s of the burst
                         Doing this for multiple other random sections of the burst 
                     '''   
 
-                    rebinned_468, mag_468, params_468 = funcs.process_Kletzing_windows(
-                            Bu_sample,Bv_sample,Bw_sample,
+                    rebinned_468, mag_468, params_468 = funcs.process_Kletzing_windows(Bsamples,
                             burst_params,
                             date_params,
                             file_access)
