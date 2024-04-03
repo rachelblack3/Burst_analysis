@@ -254,8 +254,8 @@ class AccessSurveyAttributes:
 
         return(epoch)
 
-class get_gyrofrequency:
-
+class cross_dataset:
+    ''' A class for performing operations across datasets '''
     def __init__(self,survey_data, l4_data, burst_time):
 
         self.survey_epoch = survey_data['Epoch']
