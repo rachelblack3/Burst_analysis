@@ -6,7 +6,80 @@ import pandas as pd
 from spacepy import pycdf
 import fft_box as ft
 
+global_constants = {"Duration": 4.698, 
+                    "Electron q": 1.6*10**(-19),
+                    "Electron m":9.1*10**(-31),
+                    "Convert to nT": (10**(-9))}   
 
+class omni_dataset:
+    ''' Class for creating omni_dataset over full duration specified '''
+
+    def __init__(self,start,end):
+        self.start_date = start
+        self.end_date = end
+
+    def omni_stats(self):
+        
+            omni_file = '/data/spacecast/wip/jinng_data/solar_wind/omni_high_res_combined_2000_to_2020.txt'
+            file_format = '/data/spacecast/wip/jinng_data/solar_wind/high_res_format'
+            f_format = open(f'{file_format}.txt',"r")
+            line_formats=f_format.readlines()
+
+            for line in line_formats:
+                print(line)
+            f_format.close()
+            # From this, AE is line 11, so index line position 10
+            # Initialise empty lists to store AE and omni_epoch
+
+            AE=[]
+            epoch_omni=[]
+            Kp=[]
+            print('the start and end are',self.start_date,self.end_date)
+            start_d = str(self.start_date.strftime("%Y-%m-%d"))
+            
+            no_days = self.end_date - self.start_date
+            no_days = int(no_days.days)
+
+
+            f=open(omni_file,"r")
+            lines=f.readlines()
+            i=0
+            for line in lines:
+                
+                line = [x for x in line.rstrip("\n").split(" ") if x != ""]
+                date = datetime.date(
+                    int(line[0].replace(" ", "")), 1, 1
+                ) + datetime.timedelta(
+                    days=int(line[1]) - 1
+                )
+                if date == self.start_date:
+                    print(start_d, 'string exists in file')
+                    print('Line Number:', i)
+                    first=i
+                    start_d = self.start_date
+                    break
+                i=i+1
+                    
+            for line in lines[first:(first+(no_days*24*60))]:
+            
+                line = [x for x in line.rstrip("\n").split(" ") if x != ""]
+                date = datetime.datetime(int(line[0].replace(" ", "")), 1, 1
+                ) + datetime.timedelta(
+                    days=int(line[1]) - 1,
+                    hours=int(line[2]),
+                    minutes=int(line[3]),
+                )
+                epoch_omni.append(date)
+                AE.append(float(line[10]))
+            print('OMNI dataset created')
+            f.close()
+
+            # Creating dictionary to store OMNI stats
+            OMNI_stats = {}
+            OMNI_stats["Epoch"] = epoch_omni
+            OMNI_stats["AE"] = AE
+
+            return OMNI_stats
 class DataFiles:
     ''' class for accessing all of the data files that I need on a given day.  
     
@@ -114,6 +187,8 @@ class DataFiles:
         cdf_files= glob.glob(wfr_burst_path)
 
         return cdf_files
+    
+
 
     def get_date_string(self):
         ''' Method that rpovides date strings
@@ -178,7 +253,61 @@ class AccessSurveyAttributes:
             epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
 
         return(epoch)
+
+class get_gyrofrequency:
+
+    def __init__(self,survey_data, l4_data, burst_time):
+
+        self.survey_epoch = survey_data['Epoch']
+        self.mag_epoch = l4_data['Epoch']
+        self.Bmag = l4_data['Magnitude']
+        self.burst_time = burst_time
     
+    def calc_gyro(self):
+        # get epoch in correct format for comparisons etc.
+
+        epoch_mag = epoch_convert(self.mag_epoch)
+
+        mag_field=self.Bmag
+
+        # Finding the closest index in this magnetometer list to the burst time object
+
+        mag_t,mag_index = self.find_closest(epoch_mag,self.burst_time)
+
+        # Finding the gyrofrequencies for plotting
+
+        gyro_one= global_constants["Electron q"]*mag_field[mag_index]/(2*global_constants["Pi"]*global_constants["Electron m"]) # in T
+        gyro_one = gyro_one*global_constants["Convert to nT"]                                                                   # in nT
+        gyro_half=0.5*gyro_one
+        gyro_low=0.05*gyro_one
+
+
+        return gyro_one,gyro_half,gyro_low
+    
+
+    def find_closest(self, epoch_known, wanted_time):
+
+        n = len(epoch_known)
+
+        nup = n-1
+        nlow=0
+        mid=np.int((nup+nlow)/2)
+
+        while (nup - nlow)>1:
+            mid= np.int((nup+nlow)/2)
+            if (wanted_time > epoch_known[mid]):
+                nup = nup
+                nlow=mid
+            else:
+                nup = mid
+                nlow=nlow
+        
+        wanted_index = nup
+        corresponding_time = epoch_known[wanted_index]
+
+        return(corresponding_time,wanted_index)
+    
+            
 class PerfromFFT:
     ''' class for storing all methods related to performing FFTs'''
 
@@ -208,7 +337,7 @@ class PerfromFFT:
 
         Outputs:
 
-        'mag'               - corrected magnetic spectral density in frequency bins from FFT process; nT/Hz
+        'PSD'               - corrected magnetic spectral density in frequency bins from FFT process; nT/Hz
 
         """
 
@@ -225,10 +354,7 @@ class PerfromFFT:
         box_size = 16384                                                # Number of samples in each box 
         n_bins =  int(N/box_size)                                                      # Number of points in temporal space
 
-        """ 
-        calling long FFT routine
 
-        """
         """ 
         Frequencies from FFT boxes
         """
@@ -315,16 +441,11 @@ class PerfromFFT:
         duration = n_bins*T_window
         t_array = np.linspace(0.,duration, n_bins)
 
-        fft_params = {
-            "freq": freq,
-            "df": df,
-            "n_f": n_f,
-            "n_bins": n_bins,
+        FFTs = {"Frequencies": freq,
             "PSD": PSD,
-            "time_array": t_array 
-            } 
+            "Time": t_array} 
 
-        return fft_params
+        return FFTs
     
 
     """ FFT with sliding overlapping windows """
@@ -379,10 +500,11 @@ class PerfromFFT:
         w = np.hanning(box_size)                                            # hanning window
         wms = np.mean(w**2)                                                 # hanning window correction
 
-        # Remember to normalise the box size
+        # Do sliding window FFTs
+
             
-        lower_edge = 0
-        upper_edge = box_size
+        lower_edge = 0              # Lower edge of each box
+        upper_edge = box_size       # Upper edge of each box
         i = 0 
 
         while upper_edge<N:
@@ -430,23 +552,16 @@ class PerfromFFT:
         duration = N*f_s
         t_array = np.linspace(0.,duration- f_s, n_bins)
 
-        fft_params = {
-            "freq": freq,
-            "df": df,
-            "n_f": n_f,
-            "n_bins": n_bins,
+        FFTs = {"Frequencies": freq,
             "PSD": PSD,
-            "time_array": t_array 
-            } 
+            "Time": t_array} 
 
-        return fft_params
-            
-        
-
-
+        return FFTs
+    
 
 # Class for the reuslts from windowed FFTs 
-class FFTAnalysis:
+
+class AnalyseFFT:
     ''' class for storing all methods related to analysing FFT data
     
             PARAMETERS:
@@ -455,11 +570,11 @@ class FFTAnalysis:
             
             
 
-    def __init__(self,PSD,Frequency,Duration):
-        self.PSD = PSD
-        self.Frequency = Frequency
-        self.Duration = Duration
-        
+    def __init__(self,FFTs):
+        self.PSD = FFTs["PSD"]
+        self.Frequency = FFTs["Frequencies"]
+        self.Times = FFTs["Times"]
+
 
     def show_dimensions(self):
         print(f"The dimensions (time bins, frequency bins) of FFT_Kletzing spectra is: {self.FFT.shape}")
@@ -504,30 +619,70 @@ class FFTAnalysis:
             median_468s = 0.
             Kletzing = True
         else:
-            n_468 = int((self.Duration/0.468)*n_bins)
+            n_468 = int((global_constants["Duration"]/0.468)*n_bins)
             mean_468s = np.mean(frequency_integral[:n_468])
             median_468s = np.median(frequency_integral[:n_468])
             Kletzing = False
 
         max_amplitude = np.max(np.sqrt(frequency_integral))
 
-        integral_statistics = {"maximum amplitude": max_amplitude,
-                            "mean power": np.mean(frequency_integral),
-                            "median power": np.median(frequency_integral),
-                            "power vairaince": np.std(frequency_integral)**2,
-                            "frequency integrated power": frequency_integral,
-                            "mean power over 0.468s": mean_468s,
-                            "median power over 0.468s": median_468s,
-                            "Kletzing windows?": Kletzing}
+        FFT_stats = {"Maximum amplitude": max_amplitude,
+                            "Mean power": np.mean(frequency_integral),
+                            "Median power": np.median(frequency_integral),
+                            "Power vairaince": np.std(frequency_integral)**2,
+                            "Frequency integrated power": frequency_integral,
+                            "Mean power over 0.468s": mean_468s,
+                            "Median power over 0.468s": median_468s,
+                            "Kletzing flag": Kletzing}
 
-        return integral_statistics
+        return FFT_stats
 
+class create_CDFs:
 
-# Example showing how this works
-#test = FFTMagnitudeRolling(np.asarray([1,2]), [6],10,100)
-#test.show_frequency()
-#test.show_magnitude()
-#print(test.magnitude)
+    ''' class for creating CDFs containg burst FFT data + statistics
+    
+            PARAMETERS:
+            PSD_Kletzing: 2D array of FFT spectra, with shape (n_bins, frequency_bins) correspnding to 0.468s windows, no overlap
+            Frequency_Kletzing: central frequencies for each frequency band (Hz) '''
+
+    def __init__(self,FFTs,FFT_stats,date_params):
+
+        self.PSD = FFTs["PSD"]
+        self.Frequency = FFTs["Frequency"]
+        self.Time = FFTs["Times"]
+        self.timedate = date_params
+        self.FFT_stats = FFT_stats
+    
+    
+    def save_FFT(self):
+
+        # What is the date and time of this burst? Make a directory for that day
+        file_path = '/data/emfisis_burst/wip/rablack75/rablack75/simple_FFT/burst/'+self.date_params['year']
+        os.makedirs(file_path, exist_ok=True)
+        os.makedirs(file_path+'/'+self.date_params['month'], exist_ok=True)
+        os.makedirs(file_path+'/'+self.date_params['month'] + self.date_params['day'], exist_ok=True)
+        cdf_name = file_path+'/'+self.date_params['month']+'/' + 'PSD_'+str(self.date_params['burst_time'])+'.cdf'
+        # Create CDF for Burst Time
+        cdf = pycdf.CDF(cdf_name, '')
+
+        # Save main datasets: the PSD, the time steps, and the frequencies
+        cdf['Times'] = self.Time
+        cdf['PSD'] = self.PSD
+        cdf['Frequencies'] = self.Frequency
+
+        # Set units for the above
+        cdf['PSD'].attrs['units'] = 'nT/Hz'
+        cdf['Frequencies'].attrs['units'] = 'Hz'
+        cdf['Times'].attrs['units'] = 's'
+
+        # Save statsitics
+        for x, y in self.FFT_stats.items():
+            cdf[x] = y   
+
+        # set author and give BurstDatetime
+        cdf.attrs['Author'] = 'Rachel Black'
+        cdf.attrs['BurstDatetime'] = self.date_params['burst_time']
+        cdf.close()
 
 def what_dates():
 
@@ -652,66 +807,6 @@ def calc_gyro(mag_file,survey_t):
     return gyro_one,gyro_half,gyro_low
 
 
-def omni_stats(start_date,end_date):
-    import datetime
-    import numpy as np
-
-    omni_file = '/data/spacecast/wip/jinng_data/solar_wind/omni_high_res_combined_2000_to_2020.txt'
-    file_format = '/data/spacecast/wip/jinng_data/solar_wind/high_res_format'
-    f_format = open(f'{file_format}.txt',"r")
-    line_formats=f_format.readlines()
-
-    for line in line_formats:
-        print(line)
-    f_format.close()
-    # From this, AE is line 11, so index line position 10
-    # Initialise empty lists to store AE and omni_epoch
-
-    AE=[]
-    epoch_omni=[]
-    Kp=[]
-    print('the start and end are',start_date,end_date)
-    start= str(start_date.strftime("%Y-%m-%d"))
-    
-    no_days = end_date - start_date
-    no_days = int(no_days.days)
-
-    print('but the start is',start)
-
-    f=open(omni_file,"r")
-    lines=f.readlines()
-    i=0
-    for line in lines:
-        
-        line = [x for x in line.rstrip("\n").split(" ") if x != ""]
-        date = datetime.date(
-            int(line[0].replace(" ", "")), 1, 1
-        ) + datetime.timedelta(
-            days=int(line[1]) - 1
-        )
-        if date == start_date:
-            print(start, 'string exists in file')
-            print('Line Number:', i)
-            first=i
-            start = start_date
-            break
-        i=i+1
-            
-    for line in lines[first:(first+(no_days*24*60))]:
-    
-        line = [x for x in line.rstrip("\n").split(" ") if x != ""]
-        date = datetime.datetime(int(line[0].replace(" ", "")), 1, 1
-        ) + datetime.timedelta(
-            days=int(line[1]) - 1,
-            hours=int(line[2]),
-            minutes=int(line[3]),
-        )
-        epoch_omni.append(date)
-        AE.append(float(line[10]))
-    print('OMNI dataset created')
-    f.close()
-
-    return epoch_omni,AE
 
 def bin_edges(widths,start_date,year,month,day):
     """ 
