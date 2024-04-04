@@ -238,7 +238,7 @@ class DataFiles:
         
         return date_string,year,month,day
 
-class AccessSurveyAttributes:
+class AccessSurveyAttrs:
     ''' Class for finding and working on Survey data attributes
      
       PARAMETERS:
@@ -288,7 +288,7 @@ class AccessSurveyAttributes:
 
         # Define empty list for total mag field array 
 
-        Etotal = np.zeros(self.survey_cdf['EuEu'].shape)
+        Etotal = np.zeros(Eu2.shape)
 
         # Create total mag B array
 
@@ -296,6 +296,126 @@ class AccessSurveyAttributes:
             Etotal[p,:] =Eu2[p,:]+ Ev2[p,:] + Ew2[p,:]
 
         return Etotal
+    
+    def epoch_convert(self):
+    # get epoch in correct format for comparisons etc.
+        epoch = []
+
+        # First - saving the epoch elements to a list as a string - acording to a particular desired format
+        for i in range(len(self.survey_cdf['Epoch'])):
+            epoch.append(datetime.strftime(self.survey_cdf['Epoch'][i],'%Y-%m-%d %H-%M-%S'))
+
+        # Chaning back to a datetime object of same format    
+        for i in range(len(epoch)):
+            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+
+        return(epoch)
+    
+class AccessL3Attrs:
+    ''' Class for finding and working on L3 data attributes
+     
+      PARAMETERS:
+      mag_cdf: A CDF containing all L3 data '''
+
+    def __init__(self, mag_file):
+        self.mag_cdf = mag_file
+
+    @property
+    def Bmagnitude(self):
+        # Frequency in Hz
+        Bmagnitude = self.mag_cdf['Magnitude']
+
+        return Bmagnitude
+    
+    @property
+    def epoch(self):
+        # Epoch in DateTime format of: 
+        epoch = self.mag_cdf['Epoch']
+
+        return epoch
+    
+    def epoch_convert(self):
+    # get epoch in correct format for comparisons etc.
+        epoch = []
+
+        # First - saving the epoch elements to a list as a string - acording to a particular desired format
+        for i in range(len(self.survey_cdf['Epoch'])):
+            epoch.append(datetime.strftime(self.survey_cdf['Epoch'][i],'%Y-%m-%d %H-%M-%S'))
+
+        # Chaning back to a datetime object of same format    
+        for i in range(len(epoch)):
+            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+
+        return(epoch)
+    
+    def f_ce(self):
+        # Finding the gyrofrequencies for plotting
+       
+        gyro_1 = np.zeros(self.Bmagnitude.shape)
+        gyro_half = np.zeros(self.Bmagnitude.shape)
+        gyro_05 = np.zeros(self.Bmagnitude.shape)
+        
+        # Clean magnetometer data
+        mag_cleaned = self.clean_magnetometer(self,self.Bmagnitude)
+
+
+        for i in range(0,len(gyro_1)):
+            gyro_1[i] = global_constants["Electron q"]*mag_cleaned[i]*global_constants["Convert to nT"]/(2*global_constants["Pi"]*global_constants['Electron m'])
+            gyro_half[i] = 0.5*gyro_1[i]
+            gyro_05[i] = 0.05*gyro_1[i]
+
+    def clean_magnetometer(self,unclean_data):
+
+        magfill = self.mag_cdf['magFill']
+        magInval = self.mag_cdf['magInvalid']
+        magCal = self.mag_cdf['calState']
+
+        # Find the indicies where we have invalid data, save to 'whereFill' 
+        whereFill = []
+        for i in range(len(magfill)):
+            if (magfill[i] == 1 or magInval[i]==1 or magCal[i]==1):
+                whereFill.append(i)
+                
+        # Make unclean data into list
+        magnitude = unclean_data.tolist()
+
+        # Use list of indicies to set all invlaid data points to NaNs
+        for ele in sorted(whereFill, reverse = True):
+            
+            magnitude[ele] = np.nan
+        
+        return magnitude
+
+
+class AccessL4Attrs:
+    ''' Class for finding and working on L4 data attributes.
+     
+      PARAMETERS:
+      density_cdf: A CDF containing all L4 data '''
+
+    def __init__(self, density_file):
+        self.density_cdf = density_file
+
+    @property
+    def density(self):
+        # density in cm^(-3)
+        density = self.density_cdf['density']
+
+        return density
+    
+    @property 
+    def f_pe(self):
+        # plasma frequency in Hz
+        f_pe = self.density_cdf['fpe']
+
+        return f_pe
+        
+    @property
+    def epoch(self):
+        # Epoch in DateTime format of: 
+        epoch = self.mag_cdf['Epoch']
+
+        return epoch
     
     def epoch_convert(self):
     # get epoch in correct format for comparisons etc.
