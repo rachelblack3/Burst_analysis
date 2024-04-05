@@ -27,7 +27,7 @@ import get_date as gd
 import funcs as funcs
 
 # import class for holding all the FFT data 
-from funcs import FFTMagnitude, DataFiles, AccessSurveyAttributes
+from funcs import DataFiles, AccessSurveyAttrs
 
 """ Defining all global variables 
 
@@ -55,7 +55,11 @@ The files being used for the FFTs are either the 6s burst waveform samples, or t
 wfr_folder ='/data/spacecast/wave_database_v2/RBSP-A/L2'
 burst6 = 'rbsp-a_WFR-waveform-continuous-burst_emfisis-L2_'
 
-epoch_omni,AE=funcs.omni_stats(start_date,end_date)
+epoch_omni,AE= funcs.omni_dataset(start_date,end_date).omni_stats
+# Plot 3/8 in summary plot - geomagnetic indicies
+
+plot3 = {"AE": AE,
+         "Epoch": epoch_omni}
 
 
 for single_day in (start_date + timedelta(n) for n in range(no_days)):
@@ -71,48 +75,62 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
     # Getting the magnetometer data
  
     mag_file = pycdf.CDF(day_files.magnetic_data)
+    mag_data = funcs.AccessL3Attrs(mag_file)
+    # Getting the density data
 
+    density_file = pycdf.CDF(day_files.l4_data)
+    density_data = funcs.AccessL4Attrs(density_file)
     # Getting the LANL data
 
     lanl_file = h5py.File(day_files.lanl_data)
- 
-    # Getting survey file and accessing survey frequencies
+    lanl_data = funcs.AccessLANLAttrs(lanl_file)
+    # Getting survey file and accessing survey frequencies, epoch and magnitude
 
-    #survey = pycdf.CDF(ft.survey_data(single_day,year,month,day)) 
     survey_file = pycdf.CDF(day_files.survey_data)
-    survey_freq = AccessSurveyAttributes(survey_file).frequency
+    survey_data = AccessSurveyAttrs(survey_file)
 
-    # files are all CDFs for a given day
-    #cdfs = glob.glob(wfr_burst_path)
+    survey_freq = survey_data.frequency
+    survey_epoch = survey_data.epoch_convert()
+    Btotal = survey_data.Bmagnitude
+
+    # Getting gyrofrequencies and plasma frequency for the full day
+
+    fpe = density_data.f_pe
+    fpe_epoch = density_data.epoch_convert()
+
+    fce, fce_05, fce_005 = mag_data.f_ce
+    fce_epoch = mag_data.epoch_convert()
+
+    # Getting LANL attributes
+    Lstar = lanl_data.L_star
+    MLT = lanl_data.MLT
+    MLAT_N, MLAT_S = lanl_data.MLAT_N_S
+    lanl_epoch = lanl_data.epoch
+
+    # Plot 1/8 in summary plot - Survey PSD with trimmings
+
+    plot1 = {"Bmagnitude": Btotal, "Frequency": survey_freq, "Epoch": survey_epoch,
+             "fpe": fpe, "fpe_epoch": fpe_epoch,
+             "fce": fce, "fce_05": fce_05, "fce_005": fce_005, "fce_epoch": fce_epoch}
+    
+    
+    # Plot 2/8 in summary plot - spacecraft locations
+    plot2 = {"MLT": MLT, "L*": Lstar, "MLAT North": MLAT_N, "MLAT South": MLAT_S,
+             "Epoch": lanl_epoch}
+    
+
+    # add xlims to plot 3
+
+    lower_xlim, upper_xlim = lanl_data.day_limits
+    plot3["lower xlim"] =  lower_xlim
+    plot3["upper xlim"] =  upper_xlim
+    
+    # get all burst CDFs for chosen day 
     cdfs = day_files.burst_paths
     no_cdf = len(cdfs)
 
     # Define empty list for storing number of records in each CDF
     no_rec = []
-
-    # empty list for holding gyrofrequencies
-
-    g1=[]                                           # 1*gyrofreqency
-    ghalf=[]                                        # 0.5*gyrofrequeuncy
-    glow=[]                                         # 0.05*gyrofrequency
-
-    # empty lists for holding the small-window FFT results 
-    data_set = []                                   # B field fft data
-    freq_set=[]                                     # Frequencies corresponding to FFT data 
-    high_b = []                                     # high resoloution frequency-integrated burst distribution 
-
-    burst_times =[]                                 # datetime list of burst samples for each day
-    surv_set = []                                   # survey magnetic field spectral density for each day
-
-    b_box = []                                      # frequency integrated power over first 0.468s window spectrun
-    s = []                                          # frequency intergrated power over survey spectrum 
-    b_all = []
-
-    b_dist=[]                                       # burst distribution for 12 0.468s samples
-    color_plots = []                                # saving output for each of the 12 0.468s FFTs - so should get a coloutplot of dimension (12,Number_of_frequencies)
-
-    av_specs = []                                   # magnetic spectral density averaged over all small windows
-    av_specs_win=[]                                 # magnetic spectral density averaged over first window
 
     if (no_cdf>0):
 
@@ -125,15 +143,9 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
             # Open burst file
             burst = pycdf.CDF(cdf)
 
-            # files for passing to functions more easily
-            file_access = {
-                "survey_file": survey_file,
-                "burst_file": burst,
-                "mag_file": mag_file}
-
             # Count how many records on each CDF
             no_rec = len(burst['Epoch'])
-            burst_epoch = funcs.epoch_convert(burst['Epoch'])
+            burst_epoch = funcs.get_epoch(burst['Epoch'])
         
             B_cal = burst['BCalibrationCoef']       # B callibration values (for each of 6500 frequencies, regulary spaced)
             df_cal = burst['CalFrequencies'][0]     # Frequency step size required for burst callibaration
@@ -145,175 +157,45 @@ for single_day in (start_date + timedelta(n) for n in range(no_days)):
                 "df_cal": df_cal,
                 "f_max": f_max}
 
-            time_range = [time(hour = 6,minute = 0,second=0),time(hour = 6,minute = 10,second=0)]
+            #time_range = [time(hour = 6,minute = 0,second=0),time(hour = 6,minute = 10,second=0)] I do want the abillity to put in sepcific events
             # Now churning through each record in a given CDF
             for i in range(no_rec):
-                if (time_range[0]< burst_epoch[i].time() <time_range[1]):
-                    #break
-                #if 19<i<22:
-                    print(i+1, " bursts have now been identified")
+                    
+                if (i%10 == 0):
+                    print(i, " bursts have now been identified")
 
                 # date parameters for passing to functions more easily
-                    date_params = {
-                        "year": year,
-                        "month": month,
-                        "day": day,
-                        "single_day": single_day,
-                        "burst_time": burst['Epoch'][i]}
-                    
-                    # Save the burst time to list for plotting
-                    burst_times.append(burst['Epoch'][i])
+                date_params = {
+                    "year": year,
+                    "month": month,
+                    "day": day,
+                    "single_day": single_day,
+                    "burst_time": burst['Epoch'][i]}
 
+                ''' Find gyrfofrequencies for plotting '''
 
-                    """ 
-                    Bu Bv Bw waveforms from burst file 
-                    """
-                    Bu_sample = burst['BuSamples'][i]
-                    Bv_sample = burst['BvSamples'][i]
-                    Bw_sample = burst['BwSamples'][i]
-                    
-                    Bsamples = {"Bu": Bu_sample,
-                               "Bv": Bv_sample,
-                               "Bw": Bw_sample}
+                gyro1,gyrohalf,gyrolow = funcs.cross_dataset(survey_file, mag_file, date_params["burst_time"]).calc_gyro()
 
-                    ''' Doing FFTs of the 0.468s samples from the burst sample
-                        The ACTUAL survey is taken from the first 0.468s of the burst
-                        Doing this for multiple other random sections of the burst 
-                    '''   
+                fces = gyro1,gyrohalf,gyrolow
 
-                    rebinned_468, mag_468, params_468 = funcs.process_Kletzing_windows(Bsamples,
-                            burst_params,
-                            date_params,
-                            file_access)
-                    
+                """ 
+                Bu Bv Bw waveforms from burst file 
+                """
+                
+                Bsamples = {"Bu": burst['BuSamples'][i],
+                            "Bv": burst['BvSamples'][i],
+                            "Bw": burst['BwSamples'][i]}
 
-
-                    ''' Doing FFTs of entire 6 second data ste, with overlapping windows of size 1024
-                    '''
-                    
-                    mag_030,params_030 = funcs.process_small_windows(Bu_sample,Bv_sample,Bw_sample,
-                            burst_params)  
-                            
-                    slider = int(1024/4)
-                    
-                    mag_030,params_030 = funcs.process_sliding_windows(Bu_sample,Bv_sample,Bw_sample,slider,burst_params)
-
-                    ''' Comparing the first 0.468s window to the average of the first 0.468s of 0.030s windows
-                    '''              
-                    
-                    av_comparison= np.zeros(params_030["n_f"])
-
-                    for m in range(params_030["n_f"]):
-                        av_comparison[m] = np.mean(mag_030[:61,m])
-                    
-                    rebinned_comp = funcs.rebin_burst(survey_file,av_comparison,params_030["freq"],single_day,year,month,day)
-                    
-
-                    """ 
-                    Find survey for equivalent time
-                    """
-                    Btotal = funcs.process_survey(file_access)
-                    surv_set.append(Btotal)
-
-                    ''' Find gyrfofrequencies for plotting '''
-
-                    # First find survey time for rec
-
-                    time_s, surv_index= funcs.surv_burst(burst['Epoch'][i],AccessSurveyAttributes(survey_file).epoch)
-
-                    # Then add calculated fractions of the gyrofrequency to their respective lists
-                    g1.append(funcs.calc_gyro(mag_file,time_s)[0])
-                    ghalf.append(funcs.calc_gyro(mag_file,time_s)[1])
-                    glow.append(funcs.calc_gyro(mag_file,time_s)[2])
-                    
-
-                    data_set.append(mag_030)
-                    freq_set.append(params_030["freq"])
-
-                    """" Do the survey integration """
-
-                    survey_int = funcs.integrate_in_rebin(Btotal[surv_index,:],survey_freq)
-                            
-                    s.append(survey_int)    
-
-                    """" Do the burst integration """
-
-                    burst_int = funcs.integrate_in_rebin(rebinned_468,survey_freq)
-                            
-                    b_box.append(burst_int)    
-
-                    
-                    """ Do the Kletzing FFT for first 12 0.468s samples """
-
-                    box_dist,color_samples,reb_sancheck = funcs.box_dist(Bu_sample,Bv_sample,Bw_sample,B_cal,
-                                                survey_file,survey_freq,
-                                                year,month,day,
-                                                single_day)
-                    
-                    b_dist.append(box_dist)
-                    color_plots.append(color_samples)
-                    
-                    
-                    print('The burst box is',burst_int,'and the survey is',survey_int, 'and sanity check burst is',box_dist[0])
-
-
-                    """" Do the high burst integration """
-
-                    intergral_statistics = funcs.integrate_in_small_windows(mag_030,params_030)
-
-                    """ Averaging the 0.03s windows """
-
-                    av_rebinned, av_rebinned_win = funcs.spectrum_averaging(mag_030,params_030,file_access,date_params)
-                    av_specs.append(av_rebinned)
-
-                    av_specs_win.append(av_rebinned_win)
-
-                    high_b.append(intergral_statistics["frequency integrated power"])
-                    
-                    print('The standard deviation of the burst sample distribution is',np.std(box_dist))
-
-
-
-    epoch_survey = AccessSurveyAttributes(survey_file).epoch_convert()
-
-
-    plotting_dict = {"Frequencies for sliding windows": freq_set,
-                     "PSD for sliding windows":data_set,
-                     "0.5 gyrofrequency": ghalf,
-                     "0.05 gyrofrequency": glow,
-                     "Gyrofrequency": g1,
-                     "Survey frequencies": survey_freq,
-                     "Survey epoch": epoch_survey,
-                     "survey PSD": Btotal,
-                     "Timestamps on bursts": burst_times,
-                     "LANL_dict": lanl_file,
-                     "AE": AE,
-                     "OMNI epoch": epoch_omni,
-                     "Year":year,
-                     "Month": month,
-                     "Day": day,
-                     "Survey integral":s,
-                     "First 0.468s FFT integral": b_box,
-                     "0.468s window powers": b_dist,
-                     "Sliding window integraed power":high_b,
-                     "PSD of 0.468s windows": color_plots,
-                     "Frequencies for 0.468s windows": params_468["freq"],
-                     "Power averaged over small windows": av_specs,
-                     "Power averaged over first 0.468s": av_specs_win,
-                     "Survey PSD for each day": surv_set}
-            
-    """ 
-    Plot results
-    """
-    summaries = pls.summary_plot(freq_set,data_set,
-                 ghalf,glow,g1,
-                 survey_freq,epoch_survey,Btotal,
-                 burst_times,
-                 lanl_file,AE,epoch_omni,
-                 year,month,day,
-                 survey_int,
-                 burst_int,
-                 b_dist,
-                 high_b,
-                 color_plots,params_468["freq"],
-                 av_specs,av_specs_win,surv_set)
+                ''' Doing FFTs of the 0.468s samples from the burst sample
+                    The ACTUAL survey is taken from the first 0.468s of the burst
+                    Doing this for multiple other random sections of the burst 
+                '''   
+                slider = funcs.global_constants["Slider"]
+                FFT_Kletzing = funcs.PerformFFT(Bsamples,burst_params,slider).process_Kletzing_windows()
+                
+                ''' Doing FFTs of entire 6 second data ste, with overlapping windows of size 1024
+                '''
+                FFT_sliding = funcs.PerformFFT(Bsamples,burst_params,slider).process_sliding_windows()  
+                
+                make_cdf = funcs.createPSDFiles(FFT_sliding,date_params,fces).save_FFT()
+                make_cdf = funcs.createPSDFiles(FFT_Kletzing,date_params,fces).save_FFT()

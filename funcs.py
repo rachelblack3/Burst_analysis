@@ -2,6 +2,7 @@ import numpy as np
 import os
 import glob
 from datetime import datetime,date,timedelta
+#import datetime
 import pandas as pd
 from spacepy import pycdf
 import fft_box as ft
@@ -10,7 +11,116 @@ global_constants = {"Duration": 4.698,
                     "Electron q": 1.6*10**(-19),
                     "Electron m":9.1*10**(-31),
                     "Convert to nT": (10**(-9)),
-                    "Slider": int(1024/4)}   
+                    "Pi": 3.14159,
+                    "Slider": int(1024/4)}  
+
+def get_date_string(date):
+        ''' Method that rpovides date strings
+        Outputs:
+    
+        date_string: string object of date
+        year: string object of date year
+        month: string object of date month
+        day: string object of date day '''
+
+        date_string= str(date.strftime("%Y%m%d"))
+
+        if (date.day <10):
+            day = "0"+str(date.day)
+        else:
+            day = str(date.day)
+
+
+        if (date.month<10):
+            month = "0"+str(date.month)
+        else:
+            month = str(date.month)
+        
+
+        year = str(date.year)
+        
+        return date_string,year,month,day
+
+def what_dates():
+
+    ''' Function that asks command prompt the required date range
+        Outputs:
+
+        start_date: Datetime object of start date
+        end_date: Datetime object of end date
+        no_days: Integer number of days
+    '''
+
+    # Ask for start date and make datetime object
+    year,month,day =  [eval(i) for i in input("Please enter start year, month, day: ").split(",")]
+    start_date = date(year=year, month=month, day=day)                                                       
+
+    # Ask for end date and make datetime object
+    year_end,month_end,day_end =  [eval(i) for i in input("Please enter end year, month, day: ").split(",")]
+    end_date = date(year=year_end, month=month_end, day=day_end)
+
+    # Find integer number of days in given date range
+    no_days = end_date - start_date
+    no_days = int(no_days.days)                     
+
+    return (start_date,end_date,no_days)
+
+def h5_time_conversion(bytes_time) -> datetime:
+    """
+    Converts ISO 8601 datetime, which contains leap seconds, into Python
+    datetime object
+
+    :param bytes_time: time in bytes to convert
+    :return: datetime in Python datetime object
+    """
+    date_str, time_str = bytes_time.decode("UTF-8").replace("Z", "").split("T")
+    year, month, day = date_str.split("-")
+    date = datetime(int(year), int(month), int(day))
+    no_ms_time, dot, ms = time_str.partition(".")
+    hours, minutes, seconds = no_ms_time.split(":")
+    date = date + timedelta(
+        hours=int(hours), minutes=int(minutes), seconds=int(seconds)
+    )
+    if dot:
+        date = date + timedelta(milliseconds=int(ms))
+    return date
+
+def get_epoch(epoch):
+    # get epoch in correct format for comparisons etc.
+        epoch_new = []
+
+        # First - saving the epoch elements to a list as a string - acording to a particular desired format
+        for i in range(len(epoch)):
+            epoch_new.append(datetime.strftime(epoch[i],'%Y-%m-%d %H-%M-%S'))
+
+        # Chaning back to a datetime object of same format    
+        for i in range(len(epoch_new)):
+            epoch_new[i] = datetime.strptime(epoch_new[i],'%Y-%m-%d %H-%M-%S')
+
+        return epoch_new
+
+def find_closest(epoch_known, wanted_time):
+
+        n = len(epoch_known)
+
+        nup = n-1
+        nlow=0
+        mid=np.int((nup+nlow)/2)
+
+        while (nup - nlow)>1:
+            mid= np.int((nup+nlow)/2)
+            if (wanted_time > epoch_known[mid]):
+                nup = nup
+                nlow=mid
+            else:
+                nup = mid
+                nlow=nlow
+        
+        wanted_index = nup
+        corresponding_time = epoch_known[wanted_index]
+
+        return(corresponding_time,wanted_index)
+
 
 class omni_dataset:
     ''' Class for creating omni_dataset over full duration specified '''
@@ -19,6 +129,7 @@ class omni_dataset:
         self.start_date = start
         self.end_date = end
 
+    @property
     def omni_stats(self):
         
             omni_file = '/data/spacecast/wip/jinng_data/solar_wind/omni_high_res_combined_2000_to_2020.txt'
@@ -48,12 +159,12 @@ class omni_dataset:
             for line in lines:
                 
                 line = [x for x in line.rstrip("\n").split(" ") if x != ""]
-                date = datetime.date(
+                Date = date(
                     int(line[0].replace(" ", "")), 1, 1
-                ) + datetime.timedelta(
+                ) + timedelta(
                     days=int(line[1]) - 1
                 )
-                if date == self.start_date:
+                if Date == self.start_date:
                     print(start_d, 'string exists in file')
                     print('Line Number:', i)
                     first=i
@@ -64,23 +175,18 @@ class omni_dataset:
             for line in lines[first:(first+(no_days*24*60))]:
             
                 line = [x for x in line.rstrip("\n").split(" ") if x != ""]
-                date = datetime.datetime(int(line[0].replace(" ", "")), 1, 1
-                ) + datetime.timedelta(
+                Date = datetime(int(line[0].replace(" ", "")), 1, 1
+                ) + timedelta(
                     days=int(line[1]) - 1,
                     hours=int(line[2]),
                     minutes=int(line[3]),
                 )
-                epoch_omni.append(date)
+                epoch_omni.append(Date)
                 AE.append(float(line[10]))
             print('OMNI dataset created')
             f.close()
 
-            # Creating dictionary to store OMNI stats
-            OMNI_stats = {}
-            OMNI_stats["Epoch"] = epoch_omni
-            OMNI_stats["AE"] = AE
-
-            return OMNI_stats
+            return AE,epoch_omni
 class DataFiles:
     ''' class for accessing all of the data files that I need on a given day.  
     
@@ -148,6 +254,8 @@ class DataFiles:
         lanl_path = glob.glob(lanl_path)[-1]
         
         return lanl_path
+    
+
 
     # Get L4 data filepath (aka density file) for given day
     @property
@@ -189,28 +297,7 @@ class DataFiles:
 
         return cdf_files
     
-    def open_cdf(filename):
-
-        # Open burst file
-        file = pycdf.CDF(filename)
-
-        return file 
     
-    def get_epoch(cdf):
-    # get epoch in correct format for comparisons etc.
-        epoch = []
-
-        # First - saving the epoch elements to a list as a string - acording to a particular desired format
-        for i in range(len(cdf['Epoch'])):
-            epoch.append(datetime.strftime(cdf['Epoch'][i],'%Y-%m-%d %H-%M-%S'))
-
-        # Chaning back to a datetime object of same format    
-        for i in range(len(epoch)):
-            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
-
-        return(epoch)
-
-
     def get_date_string(self):
         ''' Method that rpovides date strings
         Outputs:
@@ -238,11 +325,73 @@ class DataFiles:
         
         return date_string,year,month,day
 
+
+
+    
+class AccessLANLAttrs:
+
+    ''' Class for finding and working on Survey data attributes
+     
+      PARAMETERS:
+      survey_cdf: A CDF containing all survey data '''
+
+    def __init__(self, lanl_data):
+        self.data = lanl_data
+
+    @property
+    def L_star(self):
+
+        # get L*
+        lstar = np.array(self.data['Lstar'][:, 0])
+        
+        return lstar
+    
+    @property
+    def MLT(self):
+
+        # get MLT
+        MLT = np.array(self.data['EDMAG_MLT'])
+
+        return MLT
+    
+    @property
+    def MLAT_N_S(self):
+
+        # get all MLAT
+        MLAT = np.array(self.data['EDMAG_MLAT'])
+
+        # want to plot north and south on same axis - so split up
+        south_mask = MLAT<5.
+        north_mask = MLAT>0.
+        MLAT_north = np.where(north_mask,MLAT, np.nan)
+        MLAT_south = np.where(south_mask,MLAT, np.nan)
+
+        return MLAT_north,MLAT_south
+    
+    @property
+    def epoch(self):
+
+        lanl_times=np.array([h5_time_conversion(x) for x in self.data['IsoTime']])
+
+        return lanl_times
+    
+    @property
+    def day_limits(self):
+
+        L_star = self.L_star
+        
+        left=np.array([h5_time_conversion(x) for x in self.data['IsoTime']])[L_star >= 0][0]
+        right=np.array([h5_time_conversion(x) for x in self.data['IsoTime']])[L_star >= 0][-1]
+
+        return left,right
+
+
 class AccessSurveyAttrs:
     ''' Class for finding and working on Survey data attributes
      
       PARAMETERS:
       survey_cdf: A CDF containing all survey data '''
+    
 
     def __init__(self, survey_cdf):
         self.survey_cdf = survey_cdf
@@ -299,17 +448,18 @@ class AccessSurveyAttrs:
     
     def epoch_convert(self):
     # get epoch in correct format for comparisons etc.
-        epoch = []
+        epoch_edit = []
+        epoch = self.survey_cdf['Epoch']
 
         # First - saving the epoch elements to a list as a string - acording to a particular desired format
-        for i in range(len(self.survey_cdf['Epoch'])):
-            epoch.append(datetime.strftime(self.survey_cdf['Epoch'][i],'%Y-%m-%d %H-%M-%S'))
+        for i in range(len(epoch)):
+            epoch_edit.append(datetime.strftime(epoch[i],'%Y-%m-%d %H-%M-%S'))
 
         # Chaning back to a datetime object of same format    
-        for i in range(len(epoch)):
-            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+        for i in range(len(epoch_edit)):
+            epoch_edit[i] = datetime.strptime(epoch_edit[i],'%Y-%m-%d %H-%M-%S')
 
-        return(epoch)
+        return epoch_edit
     
 class AccessL3Attrs:
     ''' Class for finding and working on L3 data attributes
@@ -336,33 +486,37 @@ class AccessL3Attrs:
     
     def epoch_convert(self):
     # get epoch in correct format for comparisons etc.
-        epoch = []
+        epoch_edit = []
+        epoch = self.mag_cdf['Epoch']
 
         # First - saving the epoch elements to a list as a string - acording to a particular desired format
-        for i in range(len(self.survey_cdf['Epoch'])):
-            epoch.append(datetime.strftime(self.survey_cdf['Epoch'][i],'%Y-%m-%d %H-%M-%S'))
+        for i in range(len(epoch)):
+            epoch_edit.append(datetime.strftime(epoch[i],'%Y-%m-%d %H-%M-%S'))
 
         # Chaning back to a datetime object of same format    
-        for i in range(len(epoch)):
-            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+        for i in range(len(epoch_edit)):
+            epoch_edit[i] = datetime.strptime(epoch_edit[i],'%Y-%m-%d %H-%M-%S')
 
-        return(epoch)
+        return(epoch_edit)
     
+    @property
     def f_ce(self):
         # Finding the gyrofrequencies for plotting
        
         gyro_1 = np.zeros(self.Bmagnitude.shape)
-        gyro_half = np.zeros(self.Bmagnitude.shape)
         gyro_05 = np.zeros(self.Bmagnitude.shape)
+        gyro_005 = np.zeros(self.Bmagnitude.shape)
         
         # Clean magnetometer data
-        mag_cleaned = self.clean_magnetometer(self,self.Bmagnitude)
+        mag_cleaned = self.clean_magnetometer(self.Bmagnitude)
 
 
         for i in range(0,len(gyro_1)):
             gyro_1[i] = global_constants["Electron q"]*mag_cleaned[i]*global_constants["Convert to nT"]/(2*global_constants["Pi"]*global_constants['Electron m'])
-            gyro_half[i] = 0.5*gyro_1[i]
-            gyro_05[i] = 0.05*gyro_1[i]
+            gyro_05[i] = 0.5*gyro_1[i]
+            gyro_005[i] = 0.05*gyro_1[i]
+        
+        return gyro_1, gyro_05, gyro_005
 
     def clean_magnetometer(self,unclean_data):
 
@@ -377,7 +531,7 @@ class AccessL3Attrs:
                 whereFill.append(i)
                 
         # Make unclean data into list
-        magnitude = unclean_data.tolist()
+        magnitude = np.array(unclean_data).tolist()
 
         # Use list of indicies to set all invlaid data points to NaNs
         for ele in sorted(whereFill, reverse = True):
@@ -413,23 +567,24 @@ class AccessL4Attrs:
     @property
     def epoch(self):
         # Epoch in DateTime format of: 
-        epoch = self.mag_cdf['Epoch']
+        epoch = self.density_cdf['Epoch']
 
         return epoch
     
     def epoch_convert(self):
     # get epoch in correct format for comparisons etc.
-        epoch = []
+        epoch_edit = []
+        epoch = self.density_cdf['Epoch']
 
         # First - saving the epoch elements to a list as a string - acording to a particular desired format
-        for i in range(len(self.survey_cdf['Epoch'])):
-            epoch.append(datetime.strftime(self.survey_cdf['Epoch'][i],'%Y-%m-%d %H-%M-%S'))
+        for i in range(len(epoch)):
+            epoch_edit.append(datetime.strftime(epoch[i],'%Y-%m-%d %H-%M-%S'))
 
         # Chaning back to a datetime object of same format    
         for i in range(len(epoch)):
-            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+            epoch_edit[i] = datetime.strptime(epoch_edit[i],'%Y-%m-%d %H-%M-%S')
 
-        return(epoch)
+        return(epoch_edit)
 
 class cross_dataset:
     ''' A class for performing operations across datasets '''
@@ -443,13 +598,13 @@ class cross_dataset:
     def calc_gyro(self):
         # get epoch in correct format for comparisons etc.
 
-        epoch_mag = self.get_epoch(self.mag_epoch)
+        epoch_mag = get_epoch(self.mag_epoch)
 
         mag_field=self.Bmag
 
         # Finding the closest index in this magnetometer list to the burst time object
 
-        mag_t,mag_index = self.find_closest(epoch_mag,self.burst_time)
+        mag_t,mag_index = find_closest(epoch_mag,self.burst_time)
 
         # Finding the gyrofrequencies for plotting
 
@@ -461,42 +616,20 @@ class cross_dataset:
 
         return gyro_one,gyro_half,gyro_low
     
-
-    def find_closest(self, epoch_known, wanted_time):
-
-        n = len(epoch_known)
-
-        nup = n-1
-        nlow=0
-        mid=np.int((nup+nlow)/2)
-
-        while (nup - nlow)>1:
-            mid= np.int((nup+nlow)/2)
-            if (wanted_time > epoch_known[mid]):
-                nup = nup
-                nlow=mid
-            else:
-                nup = mid
-                nlow=nlow
-        
-        wanted_index = nup
-        corresponding_time = epoch_known[wanted_index]
-
-        return(corresponding_time,wanted_index)
     
     def get_epoch(epoch):
     # get epoch in correct format for comparisons etc.
-        epoch = []
+        epoch_new = []
 
         # First - saving the epoch elements to a list as a string - acording to a particular desired format
         for i in range(len(epoch)):
-            epoch.append(datetime.strftime(epoch[i],'%Y-%m-%d %H-%M-%S'))
+            epoch_new.append(datetime.strftime(epoch[i],'%Y-%m-%d %H-%M-%S'))
 
         # Chaning back to a datetime object of same format    
-        for i in range(len(epoch)):
-            epoch[i] = datetime.strptime(epoch[i],'%Y-%m-%d %H-%M-%S')
+        for i in range(len(epoch_new)):
+            epoch_new[i] = datetime.strptime(epoch_new[i],'%Y-%m-%d %H-%M-%S')
 
-        return(epoch)
+        return epoch_new
     
     
     
@@ -504,7 +637,7 @@ class cross_dataset:
 class PerformFFT:
     ''' class for storing all methods related to performing FFTs'''
 
-    def _init_(self,
+    def __init__(self,
                waveform_samples,
                burst_params,
                slider):
@@ -636,7 +769,8 @@ class PerformFFT:
 
         FFTs = {"Frequencies": freq,
             "PSD": PSD,
-            "Time": t_array} 
+            "Time": t_array,
+            "Flag": 'Kletzing'} 
 
         return FFTs
     
@@ -749,7 +883,8 @@ class PerformFFT:
         FFTs = {"Frequencies": freq,
             "PSD": PSD,
             "PSD_0468s": PSD[0:n_468,:],
-            "Time": t_array} 
+            "Time": t_array,
+            "Flag": 'sliding'} 
 
         return FFTs
     
@@ -901,49 +1036,68 @@ class rebin_data:
         
         return freq_bin, self.Survey_frequencies
 
-class create_CDFs:
+class createPSDFiles:
 
     ''' class for creating CDFs containg burst FFT data + statistics
     
             PARAMETERS:
-            PSD_Kletzing: 2D array of FFT spectra, with shape (n_bins, frequency_bins) correspnding to 0.468s windows, no overlap
-            Frequency_Kletzing: central frequencies for each frequency band (Hz) '''
+             '''
 
-    def __init__(self,FFTs,FFT_stats,date_params):
+    def __init__(self,FFTs,date_params,fces):
 
         self.PSD = FFTs["PSD"]
         self.Frequency = FFTs["Frequency"]
         self.Time = FFTs["Times"]
         self.timedate = date_params
-        self.FFT_stats = FFT_stats
+        self.Kletzing = FFTs["Flag"]
+        self.fce = fces[0]
+        self.fce_05 = fces[1]
+        self.fce_005 = fces[2]
     
     
     def save_FFT(self):
-
+        
         # What is the date and time of this burst? Make a directory for that day
-        file_path = '/data/emfisis_burst/wip/rablack75/rablack75/simple_FFT/burst/'+self.date_params['year']
+        file_path = '/data/emfisis_burst/wip/rablack75/rablack75/simple_FFT/PSDs/'+self.date_params['year']
         os.makedirs(file_path, exist_ok=True)
         os.makedirs(file_path+'/'+self.date_params['month'], exist_ok=True)
         os.makedirs(file_path+'/'+self.date_params['month'] + self.date_params['day'], exist_ok=True)
-        cdf_name = file_path+'/'+self.date_params['month']+'/' + 'PSD_'+str(self.date_params['burst_time'])+'.cdf'
+        # Is it Kletzing windows or normal?
+        if self.Kletzing == 'Kletzing':
+            cdf_name = file_path+'/'+self.date_params['month']+'/' + 'PSD_Kletzing_'+str(self.date_params['burst_time'])+'.cdf'
+        else:
+            cdf_name = file_path+'/'+self.date_params['month']+'/' + 'PSD_'+str(self.date_params['burst_time'])+'.cdf'
+
         # Create CDF for Burst Time
         cdf = pycdf.CDF(cdf_name, '')
 
         # Save main datasets: the PSD, the time steps, and the frequencies
-        cdf['Times'] = self.Time
+        cdf['Time'] = self.Time
         cdf['PSD'] = self.PSD
         cdf['Frequencies'] = self.Frequency
 
         # Set units for the above
         cdf['PSD'].attrs['units'] = 'nT/Hz'
         cdf['Frequencies'].attrs['units'] = 'Hz'
-        cdf['Times'].attrs['units'] = 's'
+        cdf['Time'].attrs['units'] = 's'
 
-        # Save statsitics
-        for x, y in self.FFT_stats.items():
-            cdf[x] = y   
+        # Set dependencies for the PSD
+        cdf['PSD'].attrs['Dependency1'] = 'Time'
+        cdf['PSD'].attrs['Dependency2'] = 'Frequency' 
 
-        # set author and give BurstDatetime
+        # important quantities
+        cdf['BurstDatetime'] = self.timedate['burst_time']
+        cdf['fce'] = self.fce
+        cdf['fce_05'] = self.fce_05
+        cdf['fce_005'] = self.fce_005
+
+        cdf['fce'].attrs['units'] = 'Hz'
+        cdf['fce_05'].attrs['units'] = 'Hz'
+        cdf['fce_005'].attrs['units'] = 'Hz'
+        cdf['BurstDatetime'].attrs['units'] = 'DateTime'
+
+        # set author
         cdf.attrs['Author'] = 'Rachel Black'
-        cdf.attrs['BurstDatetime'] = self.date_params['burst_time']
+        
         cdf.close()
+        print("CDF saved")
